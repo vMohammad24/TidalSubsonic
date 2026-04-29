@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO web_sessions (session_id, tidal_user_id, username)\n             VALUES ($1, $2, $3)\n             ON CONFLICT (session_id) DO UPDATE SET\n                 tidal_user_id = EXCLUDED.tidal_user_id,\n                 username = EXCLUDED.username",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "40b90c602ae198ba56e5e9fe4fd30b2862968ac6979a20587c0c7b982cc09792"
+}

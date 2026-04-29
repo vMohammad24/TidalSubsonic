@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT lastfm_session_key, lastfm_username FROM user_lastfm_links WHERE subsonic_username = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "lastfm_session_key",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "lastfm_username",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "d8f05a26981ce027fa953610be79eeb9e84e2120fb5122eb230e5ea316aa3d39"
+}

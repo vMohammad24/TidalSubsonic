@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO subsonic_users (username, tidal_user_id, password, use_playlists, use_favorites) VALUES ($1, $2, $3, $4, $5)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Varchar",
+        "Text",
+        "Bool",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "882bde557bc81bb6b72bc264841e5f67287ea10b68f012ef3cc12a3b9a6cb99f"
+}

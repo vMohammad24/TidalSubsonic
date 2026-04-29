@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM subsonic_users WHERE username = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5cb70d177224aff7cd79ef1e9b7c441a7a8cbe9c7ae53c8fc0ad447da3f24136"
+}

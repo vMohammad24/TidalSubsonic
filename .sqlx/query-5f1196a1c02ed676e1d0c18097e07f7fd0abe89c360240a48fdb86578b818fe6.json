@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT q.username, q.current_track_id, q.position_ms, q.track_ids, q.updated_at\n             FROM play_queues q\n             JOIN subsonic_users u ON q.username = u.username\n             WHERE u.tidal_user_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "username",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "current_track_id",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "position_ms",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "track_ids",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 4,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "5f1196a1c02ed676e1d0c18097e07f7fd0abe89c360240a48fdb86578b818fe6"
+}

@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n                u.username,\n                u.tidal_user_id,\n                u.use_playlists as \"use_playlists!\",\n                u.use_favorites as \"use_favorites!\",\n                l.lastfm_username\n             FROM subsonic_users u\n             LEFT JOIN user_lastfm_links l ON u.username = l.subsonic_username\n             WHERE u.tidal_user_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "username",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "tidal_user_id",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "use_playlists!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
+        "name": "use_favorites!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 4,
+        "name": "lastfm_username",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "2a7d882afb0a10e325a9a181d04b5f33d6eb2f872b80b0365ac41611c1994f46"
+}

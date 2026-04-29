@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE tidal_tokens SET last_data_request = $1 WHERE tidal_user_id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6f199ff49938e72fe1e71badf3f7c42b9164878508922150be27da8d6a6966e9"
+}

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM user_lastfm_links WHERE subsonic_username = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "cfcd6cec386d8e8dea71369dbc57116472988ff41769d0ca41587ff1f9d5da58"
+}

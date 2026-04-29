@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM tidal_tokens WHERE tidal_user_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f62a173e9158dd0e091372363dd97eb8ce53bb6640a53dc0a10218f6a587b829"
+}

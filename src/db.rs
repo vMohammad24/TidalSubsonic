@@ -45,12 +45,13 @@ impl DbManager {
 		&self,
 		tidal_id: &str,
 	) -> Result<Option<StoredTokens>, sqlx::Error> {
-		sqlx::query_as::<_, StoredTokens>(
-			"SELECT access_token, refresh_token, token_expiry, last_data_request FROM tidal_tokens WHERE tidal_user_id = $1",
-		)
-		.bind(tidal_id)
-		.fetch_optional(&self.pool)
-		.await
+		sqlx::query_as!(
+            StoredTokens,
+            "SELECT access_token, refresh_token, token_expiry, last_data_request FROM tidal_tokens WHERE tidal_user_id = $1",
+            tidal_id
+        )
+        .fetch_optional(&self.pool)
+        .await
 	}
 
 	pub async fn save_tokens(
@@ -58,30 +59,32 @@ impl DbManager {
 		tidal_id: &str,
 		tokens: StoredTokens,
 	) -> Result<(), sqlx::Error> {
-		sqlx::query(
-			"INSERT INTO tidal_tokens (tidal_user_id, access_token, refresh_token, token_expiry, last_data_request)
+		sqlx::query!(
+            "INSERT INTO tidal_tokens (tidal_user_id, access_token, refresh_token, token_expiry, last_data_request)
              VALUES ($1, $2, $3, $4, $5)
              ON CONFLICT (tidal_user_id) DO UPDATE SET
                  access_token = EXCLUDED.access_token,
                  refresh_token = EXCLUDED.refresh_token,
                  token_expiry = EXCLUDED.token_expiry,
                  last_data_request = COALESCE(EXCLUDED.last_data_request, tidal_tokens.last_data_request)",
-		)
-		.bind(tidal_id)
-		.bind(tokens.access_token)
-		.bind(tokens.refresh_token)
-		.bind(tokens.token_expiry)
-		.bind(tokens.last_data_request)
-		.execute(&self.pool)
-		.await?;
+            tidal_id,
+            tokens.access_token,
+            tokens.refresh_token,
+            tokens.token_expiry,
+            tokens.last_data_request
+        )
+        .execute(&self.pool)
+        .await?;
 		Ok(())
 	}
 
 	pub async fn delete_tokens(&self, tidal_id: &str) -> Result<(), sqlx::Error> {
-		sqlx::query("DELETE FROM tidal_tokens WHERE tidal_user_id = $1")
-			.bind(tidal_id)
-			.execute(&self.pool)
-			.await?;
+		sqlx::query!(
+			"DELETE FROM tidal_tokens WHERE tidal_user_id = $1",
+			tidal_id
+		)
+		.execute(&self.pool)
+		.await?;
 		Ok(())
 	}
 
@@ -89,13 +92,14 @@ impl DbManager {
 		&self,
 		subsonic_username: &str,
 	) -> Result<Option<String>, sqlx::Error> {
-		let row: Option<(String,)> =
-			sqlx::query_as("SELECT tidal_user_id FROM subsonic_users WHERE username = $1")
-				.bind(subsonic_username)
-				.fetch_optional(&self.pool)
-				.await?;
+		let row = sqlx::query!(
+			"SELECT tidal_user_id FROM subsonic_users WHERE username = $1",
+			subsonic_username
+		)
+		.fetch_optional(&self.pool)
+		.await?;
 
-		Ok(row.map(|r| r.0))
+		Ok(row.map(|r| r.tidal_user_id))
 	}
 
 	pub async fn create_user(
@@ -106,20 +110,21 @@ impl DbManager {
 		use_playlists: bool,
 		use_favorites: bool,
 	) -> Result<(), sqlx::Error> {
-		sqlx::query("INSERT INTO subsonic_users (username, tidal_user_id, password, use_playlists, use_favorites) VALUES ($1, $2, $3, $4, $5)")
-            .bind(username)
-            .bind(tidal_user_id)
-            .bind(encrypted_password)
-            .bind(use_playlists)
-            .bind(use_favorites)
-            .execute(&self.pool)
-            .await?;
+		sqlx::query!(
+            "INSERT INTO subsonic_users (username, tidal_user_id, password, use_playlists, use_favorites) VALUES ($1, $2, $3, $4, $5)",
+            username,
+            tidal_user_id,
+            encrypted_password,
+            use_playlists,
+            use_favorites
+        )
+        .execute(&self.pool)
+        .await?;
 		Ok(())
 	}
 
 	pub async fn delete_user(&self, username: &str) -> Result<(), sqlx::Error> {
-		sqlx::query("DELETE FROM subsonic_users WHERE username = $1")
-			.bind(username)
+		sqlx::query!("DELETE FROM subsonic_users WHERE username = $1", username)
 			.execute(&self.pool)
 			.await?;
 		Ok(())
@@ -129,13 +134,14 @@ impl DbManager {
 		&self,
 		tidal_user_id: &str,
 	) -> Result<Vec<String>, sqlx::Error> {
-		let rows: Vec<(String,)> =
-			sqlx::query_as("SELECT username FROM subsonic_users WHERE tidal_user_id = $1")
-				.bind(tidal_user_id)
-				.fetch_all(&self.pool)
-				.await?;
+		let rows = sqlx::query!(
+			"SELECT username FROM subsonic_users WHERE tidal_user_id = $1",
+			tidal_user_id
+		)
+		.fetch_all(&self.pool)
+		.await?;
 
-		Ok(rows.into_iter().map(|r| r.0).collect())
+		Ok(rows.into_iter().map(|r| r.username).collect())
 	}
 
 	pub async fn update_user_feature_flags(
@@ -144,12 +150,12 @@ impl DbManager {
 		use_playlists: bool,
 		use_favorites: bool,
 	) -> Result<bool, sqlx::Error> {
-		let result = sqlx::query(
+		let result = sqlx::query!(
 			"UPDATE subsonic_users SET use_playlists = $1, use_favorites = $2 WHERE username = $3",
+			use_playlists,
+			use_favorites,
+			username
 		)
-		.bind(use_playlists)
-		.bind(use_favorites)
-		.bind(username)
 		.execute(&self.pool)
 		.await?;
 		Ok(result.rows_affected() > 0)
@@ -159,12 +165,26 @@ impl DbManager {
 		&self,
 		username: &str,
 	) -> Result<Option<(String, String, bool, bool)>, sqlx::Error> {
-		sqlx::query_as(
-            "SELECT tidal_user_id, COALESCE(password, ''), use_playlists, use_favorites FROM subsonic_users WHERE username = $1",
-        )
-        .bind(username)
-        .fetch_optional(&self.pool)
-        .await
+		let row = sqlx::query!(
+			r#"SELECT
+                tidal_user_id,
+                COALESCE(password, '') as "password!",
+                use_playlists as "use_playlists!",
+                use_favorites as "use_favorites!"
+            FROM subsonic_users WHERE username = $1"#,
+			username
+		)
+		.fetch_optional(&self.pool)
+		.await?;
+
+		Ok(row.map(|r| {
+			(
+				r.tidal_user_id,
+				r.password,
+				r.use_playlists,
+				r.use_favorites,
+			)
+		}))
 	}
 
 	pub async fn link_lastfm_account(
@@ -173,12 +193,14 @@ impl DbManager {
 		session_key: &str,
 		lastfm_username: &str,
 	) -> Result<(), sqlx::Error> {
-		sqlx::query("INSERT INTO user_lastfm_links (subsonic_username, lastfm_session_key, lastfm_username) VALUES ($1, $2, $3) ON CONFLICT (subsonic_username) DO UPDATE SET lastfm_session_key = EXCLUDED.lastfm_session_key, lastfm_username = EXCLUDED.lastfm_username")
-            .bind(subsonic_username)
-            .bind(session_key)
-            .bind(lastfm_username)
-            .execute(&self.pool)
-            .await?;
+		sqlx::query!(
+            "INSERT INTO user_lastfm_links (subsonic_username, lastfm_session_key, lastfm_username) VALUES ($1, $2, $3) ON CONFLICT (subsonic_username) DO UPDATE SET lastfm_session_key = EXCLUDED.lastfm_session_key, lastfm_username = EXCLUDED.lastfm_username",
+            subsonic_username,
+            session_key,
+            lastfm_username
+        )
+        .execute(&self.pool)
+        .await?;
 		Ok(())
 	}
 
@@ -186,20 +208,24 @@ impl DbManager {
 		&self,
 		subsonic_username: &str,
 	) -> Result<Option<(String, String)>, sqlx::Error> {
-		sqlx::query_as(
+		let row = sqlx::query!(
 			"SELECT lastfm_session_key, lastfm_username FROM user_lastfm_links WHERE subsonic_username = $1",
+			subsonic_username
 		)
-		.bind(subsonic_username)
 		.fetch_optional(&self.pool)
-		.await
+		.await?;
+
+		Ok(row.map(|r| (r.lastfm_session_key, r.lastfm_username)))
 	}
 
 	#[allow(dead_code)]
 	pub async fn unlink_lastfm_account(&self, subsonic_username: &str) -> Result<(), sqlx::Error> {
-		sqlx::query("DELETE FROM user_lastfm_links WHERE subsonic_username = $1")
-			.bind(subsonic_username)
-			.execute(&self.pool)
-			.await?;
+		sqlx::query!(
+			"DELETE FROM user_lastfm_links WHERE subsonic_username = $1",
+			subsonic_username
+		)
+		.execute(&self.pool)
+		.await?;
 		Ok(())
 	}
 
@@ -209,16 +235,16 @@ impl DbManager {
 		tidal_user_id: &str,
 		username: &str,
 	) -> Result<(), sqlx::Error> {
-		sqlx::query(
+		sqlx::query!(
 			"INSERT INTO web_sessions (session_id, tidal_user_id, username)
              VALUES ($1, $2, $3)
              ON CONFLICT (session_id) DO UPDATE SET
                  tidal_user_id = EXCLUDED.tidal_user_id,
                  username = EXCLUDED.username",
+			session_id,
+			tidal_user_id,
+			username
 		)
-		.bind(session_id)
-		.bind(tidal_user_id)
-		.bind(username)
 		.execute(&self.pool)
 		.await?;
 
@@ -229,26 +255,25 @@ impl DbManager {
 		&self,
 		session_id: &str,
 	) -> Result<Option<(String, String)>, sqlx::Error> {
-		let row: Option<(String, String)> = sqlx::query_as(
+		let row = sqlx::query!(
 			"SELECT tidal_user_id, username FROM web_sessions WHERE session_id = $1",
+			session_id
 		)
-		.bind(session_id)
 		.fetch_optional(&self.pool)
 		.await?;
 
-		Ok(row)
+		Ok(row.map(|r| (r.tidal_user_id, r.username)))
 	}
 
 	pub async fn delete_web_session(&self, session_id: &str) -> Result<(), sqlx::Error> {
-		sqlx::query("DELETE FROM web_sessions WHERE session_id = $1")
-			.bind(session_id)
+		sqlx::query!("DELETE FROM web_sessions WHERE session_id = $1", session_id)
 			.execute(&self.pool)
 			.await?;
 		Ok(())
 	}
 
 	pub async fn save_play_queue(&self, queue: &PlayQueue) -> Result<(), sqlx::Error> {
-		sqlx::query(
+		sqlx::query!(
             "INSERT INTO play_queues (username, current_track_id, position_ms, track_ids, updated_at)
              VALUES ($1, $2, $3, $4, $5)
              ON CONFLICT (username) DO UPDATE SET
@@ -256,12 +281,12 @@ impl DbManager {
                  position_ms = EXCLUDED.position_ms,
                  track_ids = EXCLUDED.track_ids,
                  updated_at = EXCLUDED.updated_at",
+            queue.username,
+            queue.current_track_id,
+            queue.position_ms,
+            &queue.track_ids,
+            queue.updated_at
         )
-        .bind(&queue.username)
-        .bind(&queue.current_track_id)
-        .bind(queue.position_ms)
-        .bind(&queue.track_ids)
-        .bind(queue.updated_at)
         .execute(&self.pool)
         .await?;
 		Ok(())
@@ -271,30 +296,40 @@ impl DbManager {
 		&self,
 		tidal_user_id: &str,
 	) -> Result<Vec<UserExportData>, sqlx::Error> {
-		sqlx::query_as::<_, UserExportData>(
-			"SELECT u.username, u.tidal_user_id, u.use_playlists, u.use_favorites, l.lastfm_username
+		sqlx::query_as!(
+			UserExportData,
+			r#"SELECT
+                u.username,
+                u.tidal_user_id,
+                u.use_playlists as "use_playlists!",
+                u.use_favorites as "use_favorites!",
+                l.lastfm_username
              FROM subsonic_users u
              LEFT JOIN user_lastfm_links l ON u.username = l.subsonic_username
-             WHERE u.tidal_user_id = $1",
+             WHERE u.tidal_user_id = $1"#,
+			tidal_user_id
 		)
-		.bind(tidal_user_id)
 		.fetch_all(&self.pool)
 		.await
 	}
 
 	pub async fn update_last_data_request(&self, tidal_user_id: &str) -> Result<(), sqlx::Error> {
-		sqlx::query("UPDATE tidal_tokens SET last_data_request = $1 WHERE tidal_user_id = $2")
-			.bind(Utc::now())
-			.bind(tidal_user_id)
-			.execute(&self.pool)
-			.await?;
+		sqlx::query!(
+			"UPDATE tidal_tokens SET last_data_request = $1 WHERE tidal_user_id = $2",
+			Utc::now(),
+			tidal_user_id
+		)
+		.execute(&self.pool)
+		.await?;
 		Ok(())
 	}
+
 	pub async fn get_play_queue(&self, username: &str) -> Result<Option<PlayQueue>, sqlx::Error> {
-		sqlx::query_as::<_, PlayQueue>(
+		sqlx::query_as!(
+            PlayQueue,
             "SELECT username, current_track_id, position_ms, track_ids, updated_at FROM play_queues WHERE username = $1",
+            username
         )
-        .bind(username)
         .fetch_optional(&self.pool)
         .await
 	}
@@ -303,13 +338,14 @@ impl DbManager {
 		&self,
 		tidal_user_id: &str,
 	) -> Result<Vec<PlayQueue>, sqlx::Error> {
-		sqlx::query_as::<_, PlayQueue>(
+		sqlx::query_as!(
+			PlayQueue,
 			"SELECT q.username, q.current_track_id, q.position_ms, q.track_ids, q.updated_at
              FROM play_queues q
              JOIN subsonic_users u ON q.username = u.username
              WHERE u.tidal_user_id = $1",
+			tidal_user_id
 		)
-		.bind(tidal_user_id)
 		.fetch_all(&self.pool)
 		.await
 	}

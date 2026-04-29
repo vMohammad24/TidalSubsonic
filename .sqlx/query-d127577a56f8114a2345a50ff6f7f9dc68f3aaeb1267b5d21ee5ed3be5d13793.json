@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE subsonic_users SET use_playlists = $1, use_favorites = $2 WHERE username = $3",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bool",
+        "Bool",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d127577a56f8114a2345a50ff6f7f9dc68f3aaeb1267b5d21ee5ed3be5d13793"
+}

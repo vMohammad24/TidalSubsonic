@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO user_lastfm_links (subsonic_username, lastfm_session_key, lastfm_username) VALUES ($1, $2, $3) ON CONFLICT (subsonic_username) DO UPDATE SET lastfm_session_key = EXCLUDED.lastfm_session_key, lastfm_username = EXCLUDED.lastfm_username",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Varchar",
+        "Varchar"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e9d884d8c3c907fd7d3466f5de972d1ea1ffa32560ce52142d30164c783923ed"
+}
