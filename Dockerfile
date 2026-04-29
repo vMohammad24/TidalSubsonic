@@ -15,7 +15,7 @@ RUN cargo build --release
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates tzdata \
-    libssl3 \
+    libssl3 curl \
   && rm -rf /var/lib/apt/lists/*
 
 RUN useradd -m -U -s /usr/sbin/nologin appuser
@@ -30,6 +30,6 @@ USER appuser
 EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=3s --retries=3 \
-   CMD wget -qO- http://127.0.0.1:3000/rest/ping || exit 1
+   CMD curl -f -s http://127.0.0.1:3000/rest/ping || exit 1
 
 CMD ["/usr/local/bin/tss"]
