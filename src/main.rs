@@ -34,6 +34,14 @@ async fn main() -> std::io::Result<()> {
 		}
 	};
 
+	sqlx::migrate!("./migrations")
+		.run(&db_manager.pool)
+		.await
+		.unwrap_or_else(|e| {
+			tracing::error!("Failed to run database migrations: {}", e);
+			std::process::exit(1);
+		});
+
 	let default_country_code =
 		env::var("DEFAULT_COUNTRY_CODE").unwrap_or_else(|_| "US".to_string());
 	let tidal_manager = Arc::new(tidal::manager::TidalClientManager::new(
