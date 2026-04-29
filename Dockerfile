@@ -30,6 +30,6 @@ USER appuser
 EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=3s --retries=3 \
-   CMD curl -f -s http://127.0.0.1:3000/rest/ping&f=json&u=test || exit 1
+   CMD curl -f -s "http://127.0.0.1:3000/rest/ping?f=json&u=test" || exit 1
 
 CMD ["/usr/local/bin/tss"]
