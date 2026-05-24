@@ -130,7 +130,7 @@
               wantedBy = ["multi-user.target"];
               after = ["network.target"];
               serviceConfig = {
-                ExecStart = "${self.packages.${pkgs.system}.default}/bin/tss";
+                ExecStart = "${self.packages.${pkgs.stdenv.hostPlatform.system}.default}/bin/tss";
                 Restart = "always";
                 DynamicUser = true;
 
