@@ -1,0 +1,44 @@
+<div id="users-list" class="user-management">
+    {% for user in users %}
+    <div class="user-item" id="user-{{ user.username }}">
+        <div class="user-details">
+            <div class="user-info">
+                <strong>{{ user.username }}</strong>
+                {% if let Some(lastfm) = user.lastfm_username %}
+                <span class="lastfm-username">(Last.fm: {{ lastfm }})</span>
+                {% else %}
+                <span class="lastfm-username not-linked">(Not linked)</span>
+                {% endif %}
+            </div>
+            <form hx-post="/users/features" hx-target="#users-list-container" class="feature-flags-form">
+                <input type="hidden" name="username" value="{{ user.username }}">
+                <div class="feature-flags-row">
+                    <label>
+                        <input type="checkbox" name="use_playlists" value="true" {% if user.use_playlists %}checked{% endif %}>
+                        Use Playlists
+                    </label>
+                    <label>
+                        <input type="checkbox" name="use_favorites" value="true" {% if user.use_favorites %}checked{% endif %}>
+                        Use Favorites
+                    </label>
+                    <button type="submit" class="button small">Save</button>
+                </div>
+            </form>
+        </div>
+        <div class="user-actions">
+            <form hx-post="/lastfm/link" hx-swap="none">
+                <input type="hidden" name="username" value="{{ user.username }}">
+                <button type="submit" class="button">Link Last.fm</button>
+            </form>
+            <form hx-post="/users/delete" hx-target="#users-list-container" hx-confirm="Are you sure you want to delete this user? This cannot be undone.">
+                <input type="hidden" name="username" value="{{ user.username }}">
+                <button type="submit" class="button danger">Delete</button>
+            </form>
+        </div>
+    </div>
+    {% endfor %}
+
+    {% if users.is_empty() %}
+    <div class="empty-users">No users found. Create your first user below.</div>
+    {% endif %}
+</div>

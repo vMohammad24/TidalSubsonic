@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Tidal Subsonic - Connect to Tidal</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        :root {
+            --bg-color: #121212;
+            --card-bg: #1e1e1e;
+            --text-color: #e0e0e0;
+            --accent-color: #7f5af0;
+            --error-color: #ff4d4f;
+            --success-color: #52c41a;
+            --separator: rgba(255, 255, 255, 0.1);
+            --radius: 8px;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            line-height: 1.6;
+            padding: 2rem;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            font-size: 2rem;
+            font-weight: 700;
+            text-align: center;
+            padding-bottom: 1rem;
+            margin-bottom: 2rem;
+            border-bottom: 1px solid var(--separator);
+            color: white;
+        }
+
+        .card {
+            background: var(--card-bg);
+            border-radius: var(--radius);
+            padding: 1.5rem;
+            border: 1px solid var(--separator);
+        }
+
+        .notification {
+            padding: 1rem;
+            border-radius: var(--radius);
+            margin-bottom: 1.5rem;
+        }
+
+        .error {
+            background-color: rgba(255, 77, 79, 0.2);
+            color: var(--error-color);
+            border-left: 4px solid var(--error-color);
+        }
+
+        .auth-code {
+            font-size: 1.8rem;
+            font-weight: 700;
+            letter-spacing: 5px;
+            text-align: center;
+            background-color: rgba(0, 0, 0, 0.3);
+            padding: 0.8rem;
+            border-radius: var(--radius);
+            margin: 1rem 0;
+        }
+
+        .auth-status-pending { color: var(--accent-color); }
+        .auth-status-complete { color: var(--success-color); }
+        .auth-status-failed { color: var(--error-color); }
+        .auth-status-expired { color: #aaa; }
+
+        p {
+            margin-bottom: 0.5rem;
+        }
+
+        a, .button {
+            color: var(--accent-color);
+        }
+
+        a.button {
+            display: inline-block;
+            background: var(--accent-color);
+            color: white;
+            border-radius: var(--radius);
+            padding: 0.6rem 1.2rem;
+            font-size: 0.95rem;
+            font-weight: 500;
+            text-decoration: none;
+            margin-top: 1rem;
+        }
+
+        a.button:hover {
+            opacity: 0.9;
+        }
+
+        strong {
+            color: white;
+        }
+
+        #status {
+            margin-top: 1rem;
+            font-weight: 500;
+        }
+
+        .cancel-link {
+            display: inline-block;
+            margin-top: 1rem;
+        }
+    </style>
+</head>
+<body>
+    <h1>Connect to Tidal</h1>
+
+    {% if let Some(err) = error %}
+    <div class="notification error">{{ err }}</div>
+    <a href="/" class="button">Go Back</a>
+    {% else %}
+    <div class="card">
+        <p>Enter this code on Tidal to link your account:</p>
+        <div class="auth-code">{{ user_code }}</div>
+        <p>Visit <a href="https://{{ verification_uri_complete }}" target="_blank">{{ verification_uri_complete }}</a></p>
+        <p>Or go to <strong>{{ verification_uri }}</strong> and enter code <strong>{{ user_code }}</strong></p>
+        <p>This code will expire in {{ expires_in_minutes }} minutes</p>
+        <div id="status" class="auth-status-pending">Waiting for authorization...</div>
+        <a href="/" class="cancel-link button">Cancel</a>
+    </div>
+
+    <script>
+    (function() {
+        var sessionId = "{{ auth_session_id }}";
+        var statusEl = document.getElementById("status");
+        var retries = 0;
+        var maxRetries = 60;
+
+        function check() {
+            if (retries >= maxRetries) {
+                statusEl.textContent = "Session timed out. Please refresh to try again.";
+                statusEl.className = "auth-status-expired";
+                return;
+            }
+            retries++;
+
+            fetch("/auth/status?sessionId=" + encodeURIComponent(sessionId))
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.status === "complete") {
+                        statusEl.textContent = "Authorization successful! Redirecting...";
+                        statusEl.className = "auth-status-complete";
+                        setTimeout(function() { window.location.href = "/"; }, 1000);
+                    } else if (data.status === "failed" || data.status === "expired") {
+                        statusEl.textContent = data.error || data.message || "Authorization " + data.status;
+                        statusEl.className = "auth-status-failed";
+                    } else {
+                        setTimeout(check, 5000);
+                    }
+                })
+                .catch(function() {
+                    setTimeout(check, 5000);
+                });
+        }
+        setTimeout(check, 5000);
+    })();
+    </script>
+    {% endif %}
+</body>
+</html>
