@@ -1,5 +1,9 @@
+use actix_session::SessionMiddleware;
+use actix_session::storage::CookieSessionStore;
+use actix_web::cookie::Key;
 use actix_web::{App, HttpServer, web};
 use dotenvy::dotenv;
+use sha2::{Digest, Sha512};
 use std::env;
 use std::sync::Arc;
 use tracing::{Level, info};
@@ -42,6 +46,30 @@ async fn main() -> std::io::Result<()> {
 			std::process::exit(1);
 		});
 
+	let secret_key = match env::var("SESSION_SECRET") {
+		Ok(s) => {
+			if s.len() < 64 {
+				panic!(
+					"SESSION_SECRET is too short ({} chars), it should be at least 64 characters for security. It will be hashed, but longer is better.",
+					s.len()
+				);
+			}
+			let mut hasher = Sha512::new();
+			hasher.update(s.as_bytes());
+			Key::from(&hasher.finalize())
+		}
+		Err(_) => {
+			if cfg!(debug_assertions) {
+				info!("No SESSION_SECRET found, generating temporary key for development");
+				Key::generate()
+			} else {
+				panic!(
+					"SESSION_SECRET environment variable is required in production (min 64 chars recommended, but will be hashed)"
+				);
+			}
+		}
+	};
+
 	let default_country_code =
 		env::var("DEFAULT_COUNTRY_CODE").unwrap_or_else(|_| "US".to_string());
 	let tidal_manager = Arc::new(tidal::manager::TidalClientManager::new(
@@ -57,6 +85,10 @@ async fn main() -> std::io::Result<()> {
 
 	HttpServer::new(move || {
 		App::new()
+			.wrap(SessionMiddleware::new(
+				CookieSessionStore::default(),
+				secret_key.clone(),
+			))
 			.app_data(web::Data::new(tidal_manager.clone()))
 			.app_data(web::Data::new(db_manager.clone()))
 			.configure(api::auth::config)

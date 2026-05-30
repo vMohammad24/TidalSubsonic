@@ -14,6 +14,7 @@ serde_urlencoded = "0.7.1"
 regex = "1.12"
 
 actix-web = "4.13"
+actix-session = { version = "0.11", features = ["cookie-session"] }
 askama = { version = "0.15" }
 
 
@@ -35,7 +36,7 @@ hex = "0.4"
 md5 = "0.8"
 cipher = "0.5"
 aes-gcm = "0.10.3"
-
+sha2 = "0.11.0"
 
 chrono = { version = "0.4", features = ["serde"] }
 reqwest = { version = "0.13.2", features = ["form", "json", "query", "rustls", "stream"] }
