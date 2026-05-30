@@ -1,5 +1,7 @@
 use crate::tidal::manager::TidalClientManager;
 use crate::util::http_client;
+use crate::util::session::{extract_user_id, set_flash};
+use actix_session::Session;
 use actix_web::{HttpRequest, HttpResponse, Responder, web};
 use futures_util::future::join_all;
 use rand::RngExt;
@@ -230,9 +232,15 @@ type TokenStore = Arc<RwLock<HashMap<String, TokenState>>>;
 
 static TOKEN_STORE: LazyLock<TokenStore> = LazyLock::new(|| Arc::new(RwLock::new(HashMap::new())));
 
+#[derive(Deserialize)]
+struct LinkForm {
+	username: String,
+}
+
 pub fn config(cfg: &mut web::ServiceConfig) {
 	cfg.app_data(web::Data::new(TOKEN_STORE.clone()))
 		.route("/api/lastfm/link", web::get().to(link))
+		.route("/lastfm/link", web::post().to(link_form))
 		.route("/lastfm/callback", web::get().to(callback));
 }
 
@@ -247,16 +255,7 @@ async fn link(
 	store: web::Data<TokenStore>,
 	manager: web::Data<Arc<TidalClientManager>>,
 ) -> impl Responder {
-	let mut tidal_user_id_opt = None;
-
-	if let Some(cookie) = req.cookie("tidal_subsonic_wsid") {
-		let session_id = cookie.value();
-		if let Ok(Some((tidal_user_id, _username))) = manager.db.get_web_session(session_id).await {
-			tidal_user_id_opt = Some(tidal_user_id);
-		}
-	}
-
-	let Some(tidal_user_id) = tidal_user_id_opt else {
+	let Some(tidal_user_id) = extract_user_id(&req, &manager).await else {
 		return HttpResponse::Unauthorized().json(serde_json::json!({
 			"error": "Unauthorized"
 		}));
@@ -448,6 +447,90 @@ async fn callback(
 	HttpResponse::InternalServerError().json(serde_json::json!({
 		"error": "Failed to verify token with Last.fm"
 	}))
+}
+
+async fn link_form(
+	form: web::Form<LinkForm>,
+	req: HttpRequest,
+	session: Session,
+	store: web::Data<TokenStore>,
+	manager: web::Data<Arc<TidalClientManager>>,
+) -> impl Responder {
+	let Some(tidal_user_id) = extract_user_id(&req, &manager).await else {
+		set_flash(&session, "error", "Not authenticated");
+		return HttpResponse::SeeOther()
+			.append_header(("Location", "/"))
+			.finish();
+	};
+
+	let user_details = manager.db.get_user_details(&form.username).await;
+	let (user_tidal_id, _, _, _) = match user_details {
+		Ok(Some(d)) => d,
+		_ => {
+			set_flash(&session, "error", "User not found");
+			return HttpResponse::SeeOther()
+				.append_header(("Location", "/"))
+				.finish();
+		}
+	};
+
+	if user_tidal_id != tidal_user_id {
+		set_flash(&session, "error", "User not found");
+		return HttpResponse::SeeOther()
+			.append_header(("Location", "/"))
+			.finish();
+	}
+
+	let Ok(lastfm_api_key) = std::env::var("LASTFM_API_KEY") else {
+		set_flash(&session, "error", "Last.fm integration is not configured");
+		return HttpResponse::SeeOther()
+			.append_header(("Location", "/"))
+			.finish();
+	};
+
+	let now_ms = chrono::Utc::now().timestamp_millis() as u64;
+	let state = format!("{}", now_ms);
+	let scheme = req.connection_info().scheme().to_string();
+	let host = req.connection_info().host().to_string();
+	let origin = format!("{}://{}", scheme, host);
+
+	let callback_url = format!(
+		"{}/lastfm/callback?state={}",
+		origin,
+		urlencoding::encode(&state)
+	);
+	let auth_url = format!(
+		"https://www.last.fm/api/auth/?api_key={}&cb={}",
+		lastfm_api_key,
+		urlencoding::encode(&callback_url)
+	);
+
+	let expiration_time = now_ms + 10 * 60 * 1000;
+
+	if let Ok(mut store_write) = store.write() {
+		store_write.retain(|_, v| v.expiration_time >= now_ms);
+		store_write.insert(
+			state,
+			TokenState {
+				username: form.username.clone(),
+				expiration_time,
+			},
+		);
+	}
+
+	if req.headers().contains_key("HX-Request") {
+		return HttpResponse::Ok()
+			.append_header((
+				"HX-Trigger",
+				serde_json::json!({ "copyToClipboard": auth_url }).to_string(),
+			))
+			.content_type("text/html")
+			.body(r#"<div id="notification" hx-swap-oob="true" class="notification success">Last.fm link generated and copied to clipboard!</div>"#.to_string());
+	}
+
+	HttpResponse::Found()
+		.append_header(("Location", auth_url))
+		.finish()
 }
 
 pub async fn get_top_albums_by_tags(

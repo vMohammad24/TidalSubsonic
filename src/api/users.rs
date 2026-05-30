@@ -1,5 +1,6 @@
 use crate::tidal::manager::TidalClientManager;
 use crate::util::crypto;
+use crate::util::session::extract_user_id;
 use actix_web::{HttpRequest, HttpResponse, Responder, web};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -38,16 +39,6 @@ struct UpdateFeaturesReq {
 #[derive(Deserialize)]
 struct DeleteUserReq {
 	username: Option<String>,
-}
-
-async fn extract_user_id(req: &HttpRequest, manager: &TidalClientManager) -> Option<String> {
-	if let Some(cookie) = req.cookie("tidal_subsonic_wsid") {
-		let session_id = cookie.value();
-		if let Ok(Some((tidal_user_id, _username))) = manager.db.get_web_session(session_id).await {
-			return Some(tidal_user_id);
-		}
-	}
-	None
 }
 
 async fn get_users(

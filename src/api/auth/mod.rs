@@ -2,6 +2,7 @@ use crate::db::DbManager;
 use crate::tidal::manager::TidalClientManager;
 use actix_web::HttpRequest;
 use actix_web::{HttpResponse, Responder, web};
+use askama::Template;
 use async_zip::base::write::ZipFileWriter;
 use async_zip::{Compression, ZipEntryBuilder};
 use chrono::{Duration, Utc};
@@ -33,6 +34,17 @@ pub type DeviceAuthStore = Arc<RwLock<HashMap<String, DeviceAuthSession>>>;
 
 static SESSION_STORE: LazyLock<DeviceAuthStore> =
 	LazyLock::new(|| Arc::new(RwLock::new(HashMap::new())));
+
+#[derive(Template)]
+#[template(path = "login.html")]
+pub struct LoginTemplate {
+	pub auth_session_id: String,
+	pub user_code: String,
+	pub verification_uri: String,
+	pub verification_uri_complete: String,
+	pub expires_in_minutes: u64,
+	pub error: Option<String>,
+}
 
 pub fn config(cfg: &mut web::ServiceConfig) {
 	cfg.app_data(web::Data::new(SESSION_STORE.clone()));
@@ -69,20 +81,40 @@ async fn initiate_login(
 				},
 			);
 
-			let response = serde_json::json!({
-				"sessionId": auth_attempt_id,
-				"userCode": device_auth.user_code,
-				"verificationUri": device_auth.verification_uri,
-				"verificationUriComplete": device_auth.verification_uri_complete,
-				"expiresIn": device_auth.expires_in,
-				"message": format!("Please visit {} or go to {} and enter code {}", device_auth.verification_uri_complete, device_auth.verification_uri, device_auth.user_code)
-			});
-			HttpResponse::Ok().json(response)
+			let template = LoginTemplate {
+				auth_session_id: auth_attempt_id,
+				user_code: device_auth.user_code,
+				verification_uri: device_auth.verification_uri,
+				verification_uri_complete: device_auth.verification_uri_complete,
+				expires_in_minutes: device_auth.expires_in / 60,
+				error: None,
+			};
+			match template.render() {
+				Ok(html) => HttpResponse::Ok().content_type("text/html").body(html),
+				Err(e) => {
+					tracing::error!("Template error: {}", e);
+					HttpResponse::InternalServerError().body("Internal Server Error")
+				}
+			}
 		}
-		Err(e) => HttpResponse::InternalServerError().json(serde_json::json!({
-			"error": "Failed to start authorization",
-			"details": e.to_string()
-		})),
+		Err(e) => {
+			tracing::error!(error = %e, "Failed to start authorization");
+			let template = LoginTemplate {
+				auth_session_id: String::new(),
+				user_code: String::new(),
+				verification_uri: String::new(),
+				verification_uri_complete: String::new(),
+				expires_in_minutes: 0,
+				error: Some(format!("Failed to start authorization: {}", e)),
+			};
+			match template.render() {
+				Ok(html) => HttpResponse::Ok().content_type("text/html").body(html),
+				Err(e) => {
+					tracing::error!("Template error: {}", e);
+					HttpResponse::InternalServerError().body("Internal Server Error")
+				}
+			}
+		}
 	}
 }
 
