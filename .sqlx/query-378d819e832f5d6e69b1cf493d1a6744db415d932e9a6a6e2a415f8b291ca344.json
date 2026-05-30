@@ -6,22 +6,46 @@
       {
         "ordinal": 0,
         "name": "access_token",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "tidal_tokens",
+            "name": "access_token"
+          }
+        }
       },
       {
         "ordinal": 1,
         "name": "refresh_token",
-        "type_info": "Text"
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "tidal_tokens",
+            "name": "refresh_token"
+          }
+        }
       },
       {
         "ordinal": 2,
         "name": "token_expiry",
-        "type_info": "Timestamptz"
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "tidal_tokens",
+            "name": "token_expiry"
+          }
+        }
       },
       {
         "ordinal": 3,
         "name": "last_data_request",
-        "type_info": "Timestamptz"
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "tidal_tokens",
+            "name": "last_data_request"
+          }
+        }
       }
     ],
     "parameters": {

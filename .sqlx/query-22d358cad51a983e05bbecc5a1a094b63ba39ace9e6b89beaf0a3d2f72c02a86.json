@@ -1,16 +1,16 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT username FROM subsonic_users WHERE tidal_user_id = $1",
+  "query": "SELECT track_id FROM local_favorite_tracks WHERE username = $1 ORDER BY created_at DESC",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "username",
+        "name": "track_id",
         "type_info": "Varchar",
         "origin": {
           "Table": {
-            "table": "subsonic_users",
-            "name": "username"
+            "table": "local_favorite_tracks",
+            "name": "track_id"
           }
         }
       }
@@ -24,5 +24,5 @@
       false
     ]
   },
-  "hash": "49e98939446eb43021a0d7e2ef710ca2c7ff7ff5b6503ab4c5f180664dcfbe15"
+  "hash": "22d358cad51a983e05bbecc5a1a094b63ba39ace9e6b89beaf0a3d2f72c02a86"
 }

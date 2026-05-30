@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM local_favorite_tracks WHERE username = $1 AND track_id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4213879dbc53272fd17551fa9ee1a2d4ed9cc048b73a5ebb3531eac72bcf62e0"
+}

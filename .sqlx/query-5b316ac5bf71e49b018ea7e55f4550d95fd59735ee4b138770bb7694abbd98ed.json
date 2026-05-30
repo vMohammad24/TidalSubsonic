@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM local_favorite_albums WHERE username = $1 AND album_id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5b316ac5bf71e49b018ea7e55f4550d95fd59735ee4b138770bb7694abbd98ed"
+}

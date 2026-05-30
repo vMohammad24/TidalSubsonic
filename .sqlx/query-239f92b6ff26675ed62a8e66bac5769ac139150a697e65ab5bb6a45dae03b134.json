@@ -1,28 +1,28 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT username FROM subsonic_users WHERE tidal_user_id = $1",
+  "query": "SELECT track_id FROM local_playlist_tracks WHERE playlist_id = $1 ORDER BY position",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "username",
+        "name": "track_id",
         "type_info": "Varchar",
         "origin": {
           "Table": {
-            "table": "subsonic_users",
-            "name": "username"
+            "table": "local_playlist_tracks",
+            "name": "track_id"
           }
         }
       }
     ],
     "parameters": {
       "Left": [
-        "Text"
+        "Uuid"
       ]
     },
     "nullable": [
       false
     ]
   },
-  "hash": "49e98939446eb43021a0d7e2ef710ca2c7ff7ff5b6503ab4c5f180664dcfbe15"
+  "hash": "239f92b6ff26675ed62a8e66bac5769ac139150a697e65ab5bb6a45dae03b134"
 }

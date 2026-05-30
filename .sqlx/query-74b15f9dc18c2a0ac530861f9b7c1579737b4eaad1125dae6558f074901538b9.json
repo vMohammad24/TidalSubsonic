@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE local_playlist_tracks SET position = position - 1 WHERE playlist_id = $1 AND position > $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "74b15f9dc18c2a0ac530861f9b7c1579737b4eaad1125dae6558f074901538b9"
+}

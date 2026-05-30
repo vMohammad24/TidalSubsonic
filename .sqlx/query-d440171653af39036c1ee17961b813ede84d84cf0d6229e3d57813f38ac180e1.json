@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM local_playlists WHERE id = $1 AND username = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d440171653af39036c1ee17961b813ede84d84cf0d6229e3d57813f38ac180e1"
+}
