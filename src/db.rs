@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use sqlx::{Pool, Postgres, postgres::PgPoolOptions};
+use uuid::Uuid;
 
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct StoredTokens {
@@ -7,6 +8,18 @@ pub struct StoredTokens {
 	pub refresh_token: Option<String>,
 	pub token_expiry: Option<DateTime<Utc>>,
 	pub last_data_request: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct LocalPlaylistWithCount {
+	pub id: Uuid,
+	pub username: String,
+	pub name: String,
+	pub comment: Option<String>,
+	pub created_at: DateTime<Utc>,
+	pub updated_at: DateTime<Utc>,
+	pub song_count: i64,
+	pub duration: i64,
 }
 
 #[derive(Debug, Clone, sqlx::FromRow, serde::Serialize)]
@@ -348,5 +361,353 @@ impl DbManager {
 		)
 		.fetch_all(&self.pool)
 		.await
+	}
+
+	pub async fn create_local_playlist(
+		&self,
+		username: &str,
+		name: &str,
+		comment: Option<&str>,
+	) -> Result<LocalPlaylistWithCount, sqlx::Error> {
+		sqlx::query_as!(
+            LocalPlaylistWithCount,
+            r#"INSERT INTO local_playlists (username, name, comment)
+             VALUES ($1, $2, $3)
+             RETURNING id, username, name, comment, created_at, updated_at, 0::bigint as "song_count!", 0::bigint as "duration!""#,
+            username,
+            name,
+            comment
+        )
+        .fetch_one(&self.pool)
+        .await
+	}
+
+	pub async fn get_local_playlists(
+		&self,
+		username: &str,
+	) -> Result<Vec<LocalPlaylistWithCount>, sqlx::Error> {
+		sqlx::query_as!(
+			LocalPlaylistWithCount,
+			r#"SELECT
+                p.id, p.username, p.name, p.comment, p.created_at, p.updated_at,
+                COUNT(t.track_id) as "song_count!",
+                0::bigint as "duration!"
+            FROM local_playlists p
+            LEFT JOIN local_playlist_tracks t ON p.id = t.playlist_id
+            WHERE p.username = $1
+            GROUP BY p.id"#,
+			username
+		)
+		.fetch_all(&self.pool)
+		.await
+	}
+
+	pub async fn get_local_playlist(
+		&self,
+		id: Uuid,
+	) -> Result<Option<LocalPlaylistWithCount>, sqlx::Error> {
+		sqlx::query_as!(
+			LocalPlaylistWithCount,
+			r#"SELECT
+                p.id, p.username, p.name, p.comment, p.created_at, p.updated_at,
+                COUNT(t.track_id) as "song_count!",
+                0::bigint as "duration!"
+            FROM local_playlists p
+            LEFT JOIN local_playlist_tracks t ON p.id = t.playlist_id
+            WHERE p.id = $1
+            GROUP BY p.id"#,
+			id
+		)
+		.fetch_optional(&self.pool)
+		.await
+	}
+
+	pub async fn delete_local_playlist(&self, id: Uuid, username: &str) -> Result<(), sqlx::Error> {
+		sqlx::query!(
+			"DELETE FROM local_playlists WHERE id = $1 AND username = $2",
+			id,
+			username
+		)
+		.execute(&self.pool)
+		.await?;
+		Ok(())
+	}
+
+	pub async fn update_local_playlist(
+		&self,
+		id: Uuid,
+		username: &str,
+		name: Option<&str>,
+		comment: Option<&str>,
+	) -> Result<(), sqlx::Error> {
+		sqlx::query!(
+            "UPDATE local_playlists SET name = COALESCE($1, name), comment = COALESCE($2, comment), updated_at = NOW() WHERE id = $3 AND username = $4",
+            name,
+            comment,
+            id,
+            username
+        )
+        .execute(&self.pool)
+        .await?;
+		Ok(())
+	}
+
+	pub async fn add_tracks_to_local_playlist(
+		&self,
+		playlist_id: Uuid,
+		track_ids: &[String],
+	) -> Result<(), sqlx::Error> {
+		let mut tx = self.pool.begin().await?;
+
+		sqlx::query!(
+			r#"SELECT 1 as "locked!" FROM local_playlists WHERE id = $1 FOR UPDATE"#,
+			playlist_id
+		)
+		.fetch_one(&mut *tx)
+		.await?;
+
+		let max_pos: i32 = sqlx::query_scalar!(
+			"SELECT MAX(position) FROM local_playlist_tracks WHERE playlist_id = $1",
+			playlist_id
+		)
+		.fetch_one(&mut *tx)
+		.await?
+		.unwrap_or(-1);
+
+		for (i, track_id) in track_ids.iter().enumerate() {
+			sqlx::query!(
+				"INSERT INTO local_playlist_tracks (playlist_id, track_id, position) VALUES ($1, $2, $3)",
+				playlist_id,
+				track_id,
+				max_pos + 1 + i as i32
+			)
+			.execute(&mut *tx)
+			.await?;
+		}
+
+		tx.commit().await?;
+		Ok(())
+	}
+
+	pub async fn remove_tracks_from_local_playlist(
+		&self,
+		playlist_id: Uuid,
+		position: i32,
+	) -> Result<(), sqlx::Error> {
+		let mut tx = self.pool.begin().await?;
+
+		sqlx::query!(
+			r#"SELECT 1 as "locked!" FROM local_playlists WHERE id = $1 FOR UPDATE"#,
+			playlist_id
+		)
+		.fetch_one(&mut *tx)
+		.await?;
+
+		sqlx::query!(
+			"DELETE FROM local_playlist_tracks WHERE playlist_id = $1 AND position = $2",
+			playlist_id,
+			position
+		)
+		.execute(&mut *tx)
+		.await?;
+
+		sqlx::query!(
+            "UPDATE local_playlist_tracks SET position = position - 1 WHERE playlist_id = $1 AND position > $2",
+            playlist_id,
+            position
+        )
+        .execute(&mut *tx)
+        .await?;
+
+		tx.commit().await?;
+		Ok(())
+	}
+
+	pub async fn get_local_playlist_tracks(
+		&self,
+		playlist_id: Uuid,
+	) -> Result<Vec<String>, sqlx::Error> {
+		let rows = sqlx::query!(
+			"SELECT track_id FROM local_playlist_tracks WHERE playlist_id = $1 ORDER BY position",
+			playlist_id
+		)
+		.fetch_all(&self.pool)
+		.await?;
+
+		Ok(rows.into_iter().map(|r| r.track_id).collect())
+	}
+
+	pub async fn star_track_local(
+		&self,
+		username: &str,
+		track_id: &str,
+	) -> Result<(), sqlx::Error> {
+		sqlx::query!(
+			"INSERT INTO local_favorite_tracks (username, track_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+			username,
+			track_id
+		)
+		.execute(&self.pool)
+		.await?;
+		Ok(())
+	}
+
+	pub async fn unstar_track_local(
+		&self,
+		username: &str,
+		track_id: &str,
+	) -> Result<(), sqlx::Error> {
+		sqlx::query!(
+			"DELETE FROM local_favorite_tracks WHERE username = $1 AND track_id = $2",
+			username,
+			track_id
+		)
+		.execute(&self.pool)
+		.await?;
+		Ok(())
+	}
+
+	pub async fn star_album_local(
+		&self,
+		username: &str,
+		album_id: &str,
+	) -> Result<(), sqlx::Error> {
+		sqlx::query!(
+			"INSERT INTO local_favorite_albums (username, album_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+			username,
+			album_id
+		)
+		.execute(&self.pool)
+		.await?;
+		Ok(())
+	}
+
+	pub async fn unstar_album_local(
+		&self,
+		username: &str,
+		album_id: &str,
+	) -> Result<(), sqlx::Error> {
+		sqlx::query!(
+			"DELETE FROM local_favorite_albums WHERE username = $1 AND album_id = $2",
+			username,
+			album_id
+		)
+		.execute(&self.pool)
+		.await?;
+		Ok(())
+	}
+
+	pub async fn star_artist_local(
+		&self,
+		username: &str,
+		artist_id: &str,
+	) -> Result<(), sqlx::Error> {
+		sqlx::query!(
+			"INSERT INTO local_favorite_artists (username, artist_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+			username,
+			artist_id
+		)
+		.execute(&self.pool)
+		.await?;
+		Ok(())
+	}
+
+	pub async fn unstar_artist_local(
+		&self,
+		username: &str,
+		artist_id: &str,
+	) -> Result<(), sqlx::Error> {
+		sqlx::query!(
+			"DELETE FROM local_favorite_artists WHERE username = $1 AND artist_id = $2",
+			username,
+			artist_id
+		)
+		.execute(&self.pool)
+		.await?;
+		Ok(())
+	}
+
+	pub async fn get_local_favorite_tracks(
+		&self,
+		username: &str,
+	) -> Result<Vec<String>, sqlx::Error> {
+		let rows = sqlx::query!(
+			"SELECT track_id FROM local_favorite_tracks WHERE username = $1 ORDER BY created_at DESC",
+			username
+		)
+		.fetch_all(&self.pool)
+		.await?;
+		Ok(rows.into_iter().map(|r| r.track_id).collect())
+	}
+
+	pub async fn get_local_favorite_albums(
+		&self,
+		username: &str,
+	) -> Result<Vec<String>, sqlx::Error> {
+		let rows = sqlx::query!(
+			"SELECT album_id FROM local_favorite_albums WHERE username = $1 ORDER BY created_at DESC",
+			username
+		)
+		.fetch_all(&self.pool)
+		.await?;
+		Ok(rows.into_iter().map(|r| r.album_id).collect())
+	}
+
+	pub async fn get_local_favorite_artists(
+		&self,
+		username: &str,
+	) -> Result<Vec<String>, sqlx::Error> {
+		let rows = sqlx::query!(
+			"SELECT artist_id FROM local_favorite_artists WHERE username = $1 ORDER BY created_at DESC",
+			username
+		)
+		.fetch_all(&self.pool)
+		.await?;
+		Ok(rows.into_iter().map(|r| r.artist_id).collect())
+	}
+
+	pub async fn get_all_local_favorites_map(
+		&self,
+		username: &str,
+	) -> Result<std::collections::HashMap<i64, String>, sqlx::Error> {
+		let mut favorites = std::collections::HashMap::new();
+
+		let tracks = sqlx::query!(
+			"SELECT track_id, created_at FROM local_favorite_tracks WHERE username = $1",
+			username
+		)
+		.fetch_all(&self.pool)
+		.await?;
+		for row in tracks {
+			if let Ok(id) = row.track_id.parse::<i64>() {
+				favorites.insert(id, row.created_at.to_rfc3339());
+			}
+		}
+
+		let albums = sqlx::query!(
+			"SELECT album_id, created_at FROM local_favorite_albums WHERE username = $1",
+			username
+		)
+		.fetch_all(&self.pool)
+		.await?;
+		for row in albums {
+			if let Ok(id) = row.album_id.parse::<i64>() {
+				favorites.insert(id, row.created_at.to_rfc3339());
+			}
+		}
+
+		let artists = sqlx::query!(
+			"SELECT artist_id, created_at FROM local_favorite_artists WHERE username = $1",
+			username
+		)
+		.fetch_all(&self.pool)
+		.await?;
+		for row in artists {
+			if let Ok(id) = row.artist_id.parse::<i64>() {
+				favorites.insert(id, row.created_at.to_rfc3339());
+			}
+		}
+
+		Ok(favorites)
 	}
 }

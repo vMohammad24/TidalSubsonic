@@ -43,14 +43,13 @@ async fn get_favorite_artists(
 	as_artists_node: bool,
 ) -> impl Responder {
 	let mut resp = SubsonicResponseWrapper::ok();
-	let api = subsonic_ctx.tidal_api.clone();
 	let mut index_map: std::collections::BTreeMap<String, Vec<Artist>> =
 		std::collections::BTreeMap::new();
 
 	for artist_entry in ARTIST_CACHE.iter() {
 		let artist = crate::api::subsonic::mapping::map_tidal_artist_to_subsonic(
 			&artist_entry.1,
-			api.user_id(),
+			Some(&subsonic_ctx),
 		);
 		let name_upper = artist.name.to_uppercase();
 		let mut initial = name_upper.chars().next().unwrap_or('#').to_string();
@@ -121,7 +120,7 @@ pub async fn get_top_songs(
 		for track in top_tracks.items.into_iter().take(count as usize) {
 			songs.push(crate::api::subsonic::mapping::map_tidal_track_to_subsonic(
 				&track,
-				api.user_id(),
+				Some(&subsonic_ctx),
 				None,
 				None,
 			));
@@ -146,7 +145,7 @@ pub async fn get_similar_songs(
 			for rec_item in recommendations.items {
 				songs.push(crate::api::subsonic::mapping::map_tidal_track_to_subsonic(
 					&rec_item.track,
-					api.user_id(),
+					Some(&subsonic_ctx),
 					None,
 					None,
 				));
@@ -278,7 +277,7 @@ async fn get_artist_info_impl(
 			for a in similars.items {
 				similar_artists.push(crate::api::subsonic::mapping::map_tidal_artist_to_subsonic(
 					&a,
-					api.user_id(),
+					Some(&subsonic_ctx),
 				));
 			}
 		}
@@ -347,7 +346,7 @@ pub async fn get_random_songs(
 		for track in tracks.into_iter().take(size as usize) {
 			random_songs.push(crate::api::subsonic::mapping::map_tidal_track_to_subsonic(
 				&track,
-				api.user_id(),
+				Some(&subsonic_ctx),
 				None,
 				None,
 			));
@@ -391,7 +390,7 @@ pub async fn get_songs_by_genre(
 		for track in tracks_result.items {
 			genre_songs.push(crate::api::subsonic::mapping::map_tidal_track_to_subsonic(
 				&track,
-				api.user_id(),
+				Some(&subsonic_ctx),
 				None,
 				None,
 			));
@@ -487,7 +486,7 @@ pub async fn get_album_list(
 					subsonic_albums.push(
 						crate::api::subsonic::mapping::map_tidal_album_to_subsonic(
 							&item,
-							api.user_id(),
+							Some(&subsonic_ctx),
 							None,
 						),
 					);
@@ -510,7 +509,7 @@ pub async fn get_album_list(
 				.map(|album| {
 					crate::api::subsonic::mapping::map_tidal_album_to_subsonic(
 						&album.1,
-						api.user_id(),
+						Some(&subsonic_ctx),
 						None,
 					)
 				})
@@ -526,7 +525,7 @@ pub async fn get_album_list(
 				.map(|album| {
 					crate::api::subsonic::mapping::map_tidal_album_to_subsonic(
 						&album.1,
-						api.user_id(),
+						Some(&subsonic_ctx),
 						None,
 					)
 				})
@@ -564,7 +563,7 @@ pub async fn get_album(
 					for track in tracks.items {
 						songs.push(crate::api::subsonic::mapping::map_tidal_track_to_subsonic(
 							&track,
-							api.user_id(),
+							Some(&subsonic_ctx),
 							Some(&tidal_album),
 							None,
 						));
@@ -573,7 +572,7 @@ pub async fn get_album(
 
 				let mut subsonic_album = crate::api::subsonic::mapping::map_tidal_album_to_subsonic(
 					&tidal_album,
-					api.user_id(),
+					Some(&subsonic_ctx),
 					None,
 				);
 				subsonic_album.song = Some(songs);
@@ -614,7 +613,7 @@ pub async fn get_artist(
 					{
 						albums.push(mapping::map_tidal_album_to_subsonic(
 							&tidal_album,
-							api.user_id(),
+							Some(&subsonic_ctx),
 							Some(std::slice::from_ref(&tidal_artist)),
 						));
 					}
@@ -623,7 +622,7 @@ pub async fn get_artist(
 				let mut subsonic_artist =
 					crate::api::subsonic::mapping::map_tidal_artist_to_subsonic(
 						&tidal_artist,
-						api.user_id(),
+						Some(&subsonic_ctx),
 					);
 				subsonic_artist.album_count = albums.len() as i32;
 				subsonic_artist.album = Some(albums);
@@ -658,7 +657,7 @@ pub async fn get_song(
 				resp.response.song =
 					Some(crate::api::subsonic::mapping::map_tidal_track_to_subsonic(
 						&track,
-						api.user_id(),
+						Some(&subsonic_ctx),
 						None,
 						None,
 					));
@@ -694,7 +693,7 @@ pub async fn get_music_directory(
 		for artist_entry in artists {
 			let artist = crate::api::subsonic::mapping::map_tidal_artist_to_subsonic(
 				&artist_entry.1,
-				api.user_id(),
+				Some(&subsonic_ctx),
 			);
 			children.push(Child {
 				id: artist.id.clone(),
@@ -740,7 +739,7 @@ pub async fn get_music_directory(
 				for track in tracks.items {
 					let song = crate::api::subsonic::mapping::map_tidal_track_to_subsonic(
 						&track,
-						api.user_id(),
+						Some(&subsonic_ctx),
 						Some(&tidal_album),
 						None,
 					);
@@ -792,7 +791,7 @@ pub async fn get_music_directory(
 				{
 					let album = crate::api::subsonic::mapping::map_tidal_album_to_subsonic(
 						&tidal_album,
-						api.user_id(),
+						Some(&subsonic_ctx),
 						Some(std::slice::from_ref(&tidal_artist)),
 					);
 					children.push(Child {

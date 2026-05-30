@@ -85,7 +85,7 @@ async fn handle_search(
 						.map(|t| {
 							crate::api::subsonic::mapping::map_tidal_track_to_subsonic(
 								&t,
-								api.user_id(),
+								Some(&subsonic_ctx),
 								None,
 								None,
 							)
@@ -106,7 +106,7 @@ async fn handle_search(
 						.map(|a| {
 							crate::api::subsonic::mapping::map_tidal_album_to_subsonic(
 								&a,
-								api.user_id(),
+								Some(&subsonic_ctx),
 								None,
 							)
 						})
@@ -126,7 +126,7 @@ async fn handle_search(
 						.map(|art| {
 							crate::api::subsonic::mapping::map_tidal_artist_to_subsonic(
 								&art,
-								api.user_id(),
+								Some(&subsonic_ctx),
 							)
 						})
 						.collect()
@@ -158,7 +158,7 @@ async fn handle_search(
 				.map(|(_, track)| {
 					crate::api::subsonic::mapping::map_tidal_track_to_subsonic(
 						&track,
-						api.user_id(),
+						Some(&subsonic_ctx),
 						None,
 						None,
 					)
@@ -179,7 +179,7 @@ async fn handle_search(
 				.map(|(_, album)| {
 					crate::api::subsonic::mapping::map_tidal_album_to_subsonic(
 						&album,
-						api.user_id(),
+						Some(&subsonic_ctx),
 						None,
 					)
 				})
@@ -199,7 +199,7 @@ async fn handle_search(
 				.map(|(_, artist)| {
 					crate::api::subsonic::mapping::map_tidal_artist_to_subsonic(
 						&artist,
-						api.user_id(),
+						Some(&subsonic_ctx),
 					)
 				})
 				.collect()

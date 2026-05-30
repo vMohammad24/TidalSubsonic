@@ -27,6 +27,8 @@ pub struct SubsonicContext {
 	pub user: String,
 	pub format: String,
 	pub tidal_api: TidalApi,
+	pub use_playlists: bool,
+	pub use_favorites: bool,
 }
 
 pub struct SubsonicAuth;
@@ -114,12 +116,16 @@ where
 
 				Box::pin(async move {
 					let mut authenticated = false;
+					let mut use_playlists = true;
+					let mut use_favorites = true;
 
-					if let Some(db) = (db)
-						&& let Ok(Some((_, enc_password, _, _))) =
+					if let Some(ref db) = (db)
+						&& let Ok(Some((_, enc_password, up, uf))) =
 							db.get_user_details(&username).await
 						&& let Ok(plain_password) = crypto::decrypt_string(&enc_password)
 					{
+						use_playlists = up;
+						use_favorites = uf;
 						if let (Some(t), Some(s)) = (&t, &s) {
 							let token_expected =
 								format!("{:x}", md5::compute(format!("{}{}", plain_password, s)));
@@ -136,6 +142,15 @@ where
 					if !authenticated {
 						let err = ErrorUnauthorized("Authentication required");
 						return Err(err);
+					}
+
+					if use_favorites
+						&& let Some(db) = &db
+						&& crate::tidal::favorites::LOCAL_FAVORITE_CACHE
+							.get(&username)
+							.is_none() && let Ok(favs) = db.get_all_local_favorites_map(&username).await
+					{
+						crate::tidal::favorites::set_local_favorites_map(&username, favs);
 					}
 
 					let tidal_api = if let Some(manager) = manager {
@@ -155,6 +170,8 @@ where
 						user: username,
 						format,
 						tidal_api,
+						use_playlists,
+						use_favorites,
 					});
 
 					service.call(req).await

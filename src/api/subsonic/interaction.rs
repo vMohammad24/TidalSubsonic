@@ -236,7 +236,7 @@ async fn get_play_queue_impl(
 					{
 						songs.push(crate::api::subsonic::mapping::map_tidal_track_to_subsonic(
 							&track,
-							api.user_id(),
+							Some(&subsonic_ctx),
 							None,
 							None,
 						));

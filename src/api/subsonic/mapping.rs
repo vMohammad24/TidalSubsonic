@@ -1,5 +1,7 @@
+use crate::api::subsonic::middleware::SubsonicContext;
 use crate::api::subsonic::models::{Album, Artist, Playlist, Song};
-use crate::tidal::favorites::get_favorite_date;
+use crate::db::LocalPlaylistWithCount;
+use crate::tidal::favorites::{get_favorite_date, get_local_favorite_date};
 use crate::tidal::models::entities::{
 	Album as TidalAlbum, Artist as TidalArtist, Playlist as TidalPlaylist, Track as TidalTrack,
 };
@@ -52,7 +54,10 @@ fn extract_year(date_str: Option<&str>) -> Option<i32> {
 	None
 }
 
-pub fn map_tidal_artist_to_subsonic(artist: &TidalArtist, user_id: Option<i64>) -> Artist {
+pub fn map_tidal_artist_to_subsonic(
+	artist: &TidalArtist,
+	subsonic_ctx: Option<&SubsonicContext>,
+) -> Artist {
 	artist.cache();
 	let cover_art = artist
 		.picture
@@ -69,15 +74,25 @@ pub fn map_tidal_artist_to_subsonic(artist: &TidalArtist, user_id: Option<i64>) 
 		None
 	};
 
+	let starred = if let Some(ctx) = subsonic_ctx {
+		if ctx.use_favorites {
+			get_local_favorite_date(&ctx.user, artist.id)
+		} else {
+			ctx.tidal_api
+				.user_id()
+				.and_then(|uid| get_favorite_date(uid, artist.id))
+		}
+	} else {
+		None
+	};
+
 	Artist {
 		id: artist.id.to_string(),
 		name: artist.name.clone(),
 		cover_art: cover_art.clone(),
 		album_count: 1, // TODO: this isnt provided anywhere, we can cache it for the artists we know tho?
 		album: None,
-		starred: user_id
-			.and_then(|uid| get_favorite_date(uid, artist.id))
-			.map(|d| format_date(Some(&d))),
+		starred: starred.map(|d| format_date(Some(&d))),
 		artist_image_url,
 		user_rating: Some(0),
 	}
@@ -85,7 +100,7 @@ pub fn map_tidal_artist_to_subsonic(artist: &TidalArtist, user_id: Option<i64>) 
 
 pub fn map_tidal_album_to_subsonic(
 	album: &TidalAlbum,
-	user_id: Option<i64>,
+	subsonic_ctx: Option<&SubsonicContext>,
 	artists: Option<&[TidalArtist]>,
 ) -> Album {
 	album.cache();
@@ -116,6 +131,18 @@ pub fn map_tidal_album_to_subsonic(
 
 	let cover_art_id = album.cover.clone().unwrap_or_else(|| album.id.to_string());
 
+	let starred = if let Some(ctx) = subsonic_ctx {
+		if ctx.use_favorites {
+			get_local_favorite_date(&ctx.user, album.id)
+		} else {
+			ctx.tidal_api
+				.user_id()
+				.and_then(|uid| get_favorite_date(uid, album.id))
+		}
+	} else {
+		None
+	};
+
 	Album {
 		id: album.id.to_string(),
 		is_dir: true,
@@ -128,9 +155,7 @@ pub fn map_tidal_album_to_subsonic(
 		duration: album.duration.unwrap_or(0),
 		created: format_date(album.release_date.as_deref()),
 		year: extract_year(album.release_date.as_deref()),
-		starred: user_id
-			.and_then(|uid| get_favorite_date(uid, album.id))
-			.map(|d| format_date(Some(&d))),
+		starred: starred.map(|d| format_date(Some(&d))),
 		explicit_status: Some(if album.explicit.unwrap_or(false) {
 			"explicit".to_string()
 		} else {
@@ -142,7 +167,7 @@ pub fn map_tidal_album_to_subsonic(
 
 pub fn map_tidal_track_to_subsonic(
 	track: &TidalTrack,
-	user_id: Option<i64>,
+	subsonic_ctx: Option<&SubsonicContext>,
 	album_attrs: Option<&TidalAlbum>,
 	artists: Option<&[TidalArtist]>,
 ) -> Song {
@@ -209,6 +234,19 @@ pub fn map_tidal_track_to_subsonic(
 		.and_then(|m| m.tags.as_ref())
 		.map(|tags| tags.iter().any(|t| t == "DOLBY_ATMOS"))
 		.unwrap_or(false);
+
+	let starred = if let Some(ctx) = subsonic_ctx {
+		if ctx.use_favorites {
+			get_local_favorite_date(&ctx.user, track.id)
+		} else {
+			ctx.tidal_api
+				.user_id()
+				.and_then(|uid| get_favorite_date(uid, track.id))
+		}
+	} else {
+		None
+	};
+
 	Song {
 		id: track.id.to_string(),
 		parent: resolved_album.id.to_string(),
@@ -223,9 +261,7 @@ pub fn map_tidal_track_to_subsonic(
 		size: 0,
 		content_type: if is_mpeg { "audio/mp4" } else { "audio/flac" }.to_string(),
 		suffix: if is_mpeg { "m4a" } else { "flac" }.to_string(),
-		starred: user_id
-			.and_then(|uid| get_favorite_date(uid, track.id))
-			.map(|d| format_date(Some(&d))),
+		starred: starred.map(|d| format_date(Some(&d))),
 		duration: track.duration,
 		bit_rate,
 		path: Some(format!("tidal/track/{}", track.id)),
@@ -271,6 +307,22 @@ pub fn map_tidal_playlist_to_subsonic(
 				.unwrap_or_default(),
 		),
 		comment: playlist.description.clone(),
+		entry: None,
+	}
+}
+
+pub fn map_local_playlist_to_subsonic(playlist: &LocalPlaylistWithCount) -> Playlist {
+	Playlist {
+		id: playlist.id.to_string(),
+		name: playlist.name.clone(),
+		owner: Some(playlist.username.clone()),
+		public: Some(false),
+		song_count: playlist.song_count as i32,
+		duration: playlist.duration,
+		created: playlist.created_at.to_rfc3339(),
+		changed: Some(playlist.updated_at.to_rfc3339()),
+		cover_art: None,
+		comment: playlist.comment.clone(),
 		entry: None,
 	}
 }
