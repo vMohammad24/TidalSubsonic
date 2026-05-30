@@ -8,7 +8,7 @@ tokio = { version = "1", features = ["macros"] }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
-quick-xml = { version = "0.39.2", features = ["serialize"] }
+quick-xml = { version = "0.40", features = ["serialize"] }
 urlencoding = "2.1.3"
 serde_urlencoded = "0.7.1"
 regex = "1.12"
@@ -16,7 +16,7 @@ serde_qs = "1"
 
 actix-web = "4.13"
 actix-session = { version = "0.11", features = ["cookie-session"] }
-askama = { version = "0.15" }
+askama = { version = "0.16" }
 
 
 dotenvy = "0.15"
@@ -24,7 +24,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 moka = { version = "0.12", features = ["future", "sync"] }
-sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "chrono", "uuid"] }
+sqlx = { version = "0.9", features = ["runtime-tokio", "postgres", "chrono", "uuid"] }
 
 thiserror = "2"
 uuid = { version = "1", features = ["v4", "serde"] }

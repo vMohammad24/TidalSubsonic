@@ -138,7 +138,10 @@ fn parse_dash_manifest(xml: &str) -> Result<DashManifest, String> {
 				b"AdaptationSet" => {
 					for attr in e.attributes().flatten() {
 						if attr.key.as_ref() == b"mimeType" {
-							mime_type = attr.unescape_value().unwrap_or_default().to_string();
+							mime_type = attr
+								.normalized_value(quick_xml::XmlVersion::Explicit1_1)
+								.unwrap_or_default()
+								.to_string();
 						}
 					}
 				}
@@ -146,16 +149,22 @@ fn parse_dash_manifest(xml: &str) -> Result<DashManifest, String> {
 					for attr in e.attributes().flatten() {
 						match attr.key.as_ref() {
 							b"initialization" => {
-								init_url =
-									Some(attr.unescape_value().unwrap_or_default().to_string());
+								init_url = Some(
+									attr.normalized_value(quick_xml::XmlVersion::Explicit1_1)
+										.unwrap_or_default()
+										.to_string(),
+								);
 							}
 							b"media" => {
-								media_url =
-									Some(attr.unescape_value().unwrap_or_default().to_string());
+								media_url = Some(
+									attr.normalized_value(quick_xml::XmlVersion::Explicit1_1)
+										.unwrap_or_default()
+										.to_string(),
+								);
 							}
 							b"startNumber" => {
 								start_number = attr
-									.unescape_value()
+									.normalized_value(quick_xml::XmlVersion::Explicit1_1)
 									.unwrap_or_default()
 									.parse()
 									.unwrap_or(1);
@@ -169,7 +178,7 @@ fn parse_dash_manifest(xml: &str) -> Result<DashManifest, String> {
 					for attr in e.attributes().flatten() {
 						if attr.key.as_ref() == b"r" {
 							r = attr
-								.unescape_value()
+								.normalized_value(quick_xml::XmlVersion::Explicit1_1)
 								.unwrap_or_default()
 								.parse()
 								.unwrap_or(0);
