@@ -72,6 +72,15 @@ pub async fn scrobble(
 		if let Ok(tid) = ids[0].parse::<i64>()
 			&& let Ok(track) = api.get_track(tid).await
 		{
+			let played_at = times
+				.first()
+				.copied()
+				.and_then(|ts| chrono::DateTime::from_timestamp(ts, 0))
+				.unwrap_or(chrono::Utc::now());
+			let _ = db
+				.record_scrobble(&subsonic_ctx.user, &ids[0], played_at, false)
+				.await;
+
 			let mut params = vec![
 				("method", "track.updateNowPlaying"),
 				("track", &track.title),
@@ -114,6 +123,12 @@ pub async fn scrobble(
 					let now = chrono::Utc::now().timestamp();
 					now - (ids.len() - i) as i64 * 180
 				});
+
+				let played_at =
+					chrono::DateTime::from_timestamp(timestamp, 0).unwrap_or(chrono::Utc::now());
+				let _ = db
+					.record_scrobble(&subsonic_ctx.user, id_str, played_at, true)
+					.await;
 
 				params.push((format!("track[{}]", count), track.title.clone()));
 				params.push((format!("artist[{}]", count), track.artist.name.clone()));

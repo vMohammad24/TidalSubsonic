@@ -242,6 +242,25 @@ impl DbManager {
 		Ok(())
 	}
 
+	pub async fn record_scrobble(
+		&self,
+		username: &str,
+		track_id: &str,
+		played_at: DateTime<Utc>,
+		submission: bool,
+	) -> Result<(), sqlx::Error> {
+		sqlx::query!(
+			"INSERT INTO scrobbles (username, track_id, played_at, submission) VALUES ($1, $2, $3, $4)",
+			username,
+			track_id,
+			played_at,
+			submission,
+		)
+		.execute(&self.pool)
+		.await?;
+		Ok(())
+	}
+
 	pub async fn save_web_session(
 		&self,
 		session_id: &str,
