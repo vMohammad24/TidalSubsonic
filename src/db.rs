@@ -217,6 +217,20 @@ impl DbManager {
 		Ok(())
 	}
 
+	pub async fn get_scrobble_count(
+		&self,
+		subsonic_username: &str,
+	) -> Result<Option<i64>, sqlx::Error> {
+		let count = sqlx::query_scalar!(
+			"SELECT COUNT(*) FROM scrobbles WHERE username = $1 AND submission = true",
+			subsonic_username
+		)
+		.fetch_optional(&self.pool)
+		.await?;
+
+		Ok(count.flatten())
+	}
+
 	pub async fn get_lastfm_details(
 		&self,
 		subsonic_username: &str,

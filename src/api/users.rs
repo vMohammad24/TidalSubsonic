@@ -21,6 +21,7 @@ struct UserResponse {
 	use_playlists: bool,
 	#[serde(rename = "useFavorites")]
 	use_favorites: bool,
+	scrobbles: i64,
 }
 
 #[derive(Deserialize)]
@@ -77,11 +78,20 @@ async fn get_users(
 				.ok()
 				.flatten()
 				.map(|(_, name)| name);
+
+			let scrobbles = manager
+				.db
+				.get_scrobble_count(&u)
+				.await
+				.ok()
+				.flatten()
+				.unwrap_or(0);
 			users_with_details.push(UserResponse {
 				username: u,
 				lastfm_username,
 				use_playlists,
 				use_favorites,
+				scrobbles,
 			});
 		}
 	}

@@ -14,6 +14,7 @@ pub struct UserInfo {
 	pub lastfm_username: Option<String>,
 	pub use_playlists: bool,
 	pub use_favorites: bool,
+	pub scrobbles: i64,
 }
 
 pub fn set_flash(session: &Session, kind: &str, msg: &str) {
@@ -59,11 +60,13 @@ pub async fn get_users_info(tidal_user_id: &str, db: &DbManager) -> Vec<UserInfo
 					.ok()
 					.flatten()
 					.map(|(_, name)| name);
+				let scrobbles = db.get_scrobble_count(&u).await.ok().flatten().unwrap_or(0);
 				users.push(UserInfo {
 					username: u,
 					lastfm_username,
 					use_playlists,
 					use_favorites,
+					scrobbles,
 				});
 			}
 		}

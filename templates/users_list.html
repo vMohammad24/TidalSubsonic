@@ -9,6 +9,7 @@
                 {% else %}
                 <span class="lastfm-username not-linked">(Not linked)</span>
                 {% endif %}
+                <span class="scrobble-count">{{user.scrobbles}} Scrobbles</span>
             </div>
             <form hx-post="/users/features" hx-target="#users-list-container" class="feature-flags-form">
                 <input type="hidden" name="username" value="{{ user.username }}">
