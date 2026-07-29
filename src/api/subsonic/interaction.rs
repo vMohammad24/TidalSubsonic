@@ -4,6 +4,7 @@ use crate::db::{DbManager, PlayQueue as DbPlayQueue};
 use crate::util::http_client;
 use actix_web::{Responder, web};
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 #[derive(Deserialize)]
@@ -31,7 +32,7 @@ pub async fn scrobble(
 	let mut submission = true;
 
 	let q = req.query_string();
-	let parsed: Vec<(String, String)> = serde_qs::from_str(q).unwrap_or_default();
+	let parsed: HashMap<String, String> = serde_qs::from_str(q).unwrap_or_default();
 	for (k, v) in parsed {
 		if k == "id" {
 			ids.push(v);
