@@ -27,3 +27,29 @@ pub static CLIENT_SECRET: LazyLock<&'static str> = LazyLock::new(|| {
 		.expect("FATAL: TIDAL_CLIENT_SECRET environment variable is missing")
 		.leak()
 });
+
+pub struct TidalCredentials {
+	pub api_token: String,
+	pub client_id: String,
+	pub client_secret: String,
+}
+
+impl TidalCredentials {
+	pub fn from_env() -> Result<Self, String> {
+		let missing: Vec<_> = ["TIDAL_API_TOKEN", "TIDAL_CLIENT_ID", "TIDAL_CLIENT_SECRET"]
+			.iter()
+			.filter(|&&key| env::var(key).is_err())
+			.copied()
+			.collect();
+
+		if !missing.is_empty() {
+			return Err(format!("Missing env vars: {:?}", missing));
+		}
+
+		Ok(Self {
+			api_token: env::var("TIDAL_API_TOKEN").unwrap(),
+			client_id: env::var("TIDAL_CLIENT_ID").unwrap(),
+			client_secret: env::var("TIDAL_CLIENT_SECRET").unwrap(),
+		})
+	}
+}

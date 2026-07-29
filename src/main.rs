@@ -26,6 +26,20 @@ async fn main() -> std::io::Result<()> {
 		.finish();
 	let _ = tracing::subscriber::set_global_default(subscriber);
 
+	match tidal::config::TidalCredentials::from_env() {
+		Ok(creds) => {
+			info!(
+				"Tidal credentials validated (API Token len: {}, Client ID: {}, Client Secret len: {})",
+				creds.api_token.len(),
+				creds.client_id,
+				creds.client_secret.len()
+			);
+		}
+		Err(e) => {
+			tracing::warn!("Tidal credentials warning: {}", e);
+		}
+	}
+
 	let database_url = env::var("DATABASE_URL")
 		.unwrap_or_else(|_| "postgres://postgres:postgres@localhost:5432/tss".to_string());
 
@@ -91,12 +105,14 @@ async fn main() -> std::io::Result<()> {
 			))
 			.app_data(web::Data::new(tidal_manager.clone()))
 			.app_data(web::Data::new(db_manager.clone()))
+			.route("/health", web::get().to(api::health::health_check))
 			.configure(api::auth::config)
 			.configure(api::lastfm::config)
 			.configure(api::subsonic::config)
 			.configure(api::ui::config)
 			.configure(api::users::config)
 	})
+	.shutdown_timeout(30)
 	.bind(bind_addr)?
 	.run()
 	.await
