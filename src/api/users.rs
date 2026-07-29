@@ -99,11 +99,26 @@ async fn get_users(
 	HttpResponse::Ok().json(serde_json::json!({ "users": users_with_details }))
 }
 
+use crate::util::rate_limit::RateLimiter;
+use std::sync::LazyLock;
+
+static CREATE_USER_LIMITER: LazyLock<RateLimiter> = LazyLock::new(|| RateLimiter::new(10, 60));
+
 async fn create_user(
 	req_body: web::Json<CreateUserReq>,
 	req: HttpRequest,
 	manager: web::Data<Arc<TidalClientManager>>,
 ) -> impl Responder {
+	let client_ip = req
+		.connection_info()
+		.realip_remote_addr()
+		.unwrap_or("unknown")
+		.to_string();
+	if !CREATE_USER_LIMITER.check_and_increment(&client_ip) {
+		return HttpResponse::TooManyRequests().json(serde_json::json!({
+			"error": "Rate limit exceeded"
+		}));
+	}
 	let tidal_user_id = match extract_user_id(&req, &manager).await {
 		Some(id) => id,
 		None => {

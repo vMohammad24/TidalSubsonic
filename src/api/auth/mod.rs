@@ -56,10 +56,26 @@ pub fn config(cfg: &mut web::ServiceConfig) {
 		.route("/request_data", web::post().to(request_data));
 }
 
+use crate::util::rate_limit::RateLimiter;
+
+static LOGIN_LIMITER: LazyLock<RateLimiter> = LazyLock::new(|| RateLimiter::new(5, 60));
+static DATA_LIMITER: LazyLock<RateLimiter> = LazyLock::new(|| RateLimiter::new(2, 86400));
+
 async fn initiate_login(
+	req: HttpRequest,
 	manager: web::Data<Arc<TidalClientManager>>,
 	store: web::Data<DeviceAuthStore>,
 ) -> impl Responder {
+	let client_ip = req
+		.connection_info()
+		.realip_remote_addr()
+		.unwrap_or("unknown")
+		.to_string();
+	if !LOGIN_LIMITER.check_and_increment(&client_ip) {
+		return HttpResponse::TooManyRequests()
+			.body("Too many login attempts. Please try again later.");
+	}
+
 	let ui_client = manager.get_global_client();
 	match ui_client.device_authorization().await {
 		Ok(device_auth) => {
@@ -373,6 +389,14 @@ async fn request_data(
 	req: HttpRequest,
 	manager: web::Data<Arc<TidalClientManager>>,
 ) -> impl Responder {
+	let client_ip = req
+		.connection_info()
+		.realip_remote_addr()
+		.unwrap_or("unknown")
+		.to_string();
+	if !DATA_LIMITER.check_and_increment(&client_ip) {
+		return HttpResponse::TooManyRequests().body("Rate limit exceeded for data requests.");
+	}
 	let cookie_value = req
 		.cookie("tidal_subsonic_wsid")
 		.map(|c| c.value().to_string());
