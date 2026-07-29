@@ -81,7 +81,7 @@ where
 
 		let path = req.path();
 		let query_string = req.query_string();
-		let auth_res = serde_urlencoded::from_str::<SubsonicQuery>(query_string);
+		let auth_res = serde_qs::from_str::<SubsonicQuery>(query_string);
 
 		match auth_res {
 			Ok(query) => {

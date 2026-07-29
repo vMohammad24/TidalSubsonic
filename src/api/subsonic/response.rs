@@ -7,7 +7,38 @@ use std::collections::HashMap;
 use crate::api::subsonic::middleware::SubsonicContext;
 use crate::api::subsonic::models::SubsonicResponseWrapper;
 
+use crate::api::error::AppError;
+
 pub struct SubsonicResponder(pub SubsonicResponseWrapper);
+
+pub struct ApiResult(pub Result<SubsonicResponseWrapper, AppError>);
+
+impl ApiResult {
+	pub fn from_result<E: Into<AppError>>(res: Result<SubsonicResponseWrapper, E>) -> Self {
+		ApiResult(res.map_err(Into::into))
+	}
+}
+
+impl<E: Into<AppError>> From<Result<SubsonicResponseWrapper, E>> for ApiResult {
+	fn from(res: Result<SubsonicResponseWrapper, E>) -> Self {
+		ApiResult(res.map_err(Into::into))
+	}
+}
+
+impl Responder for ApiResult {
+	type Body = BoxBody;
+
+	fn respond_to(self, req: &HttpRequest) -> HttpResponse<Self::Body> {
+		match self.0 {
+			Ok(wrapper) => SubsonicResponder(wrapper).respond_to(req),
+			Err(err) => {
+				let (code, msg) = err.to_subsonic_code_and_msg();
+				let error_wrapper = SubsonicResponseWrapper::error(code, &msg);
+				SubsonicResponder(error_wrapper).respond_to(req)
+			}
+		}
+	}
+}
 
 fn strip_at_prefix(val: &mut serde_json::Value) {
 	match val {
@@ -48,7 +79,7 @@ impl Responder for SubsonicResponder {
 			.get::<SubsonicContext>()
 			.map(|ctx| ctx.format.clone())
 			.unwrap_or_else(|| {
-				serde_urlencoded::from_str::<HashMap<String, String>>(req.query_string())
+				serde_qs::from_str::<HashMap<String, String>>(req.query_string())
 					.ok()
 					.and_then(|q| q.get("f").cloned())
 					.unwrap_or_else(|| "xml".to_string())
@@ -89,11 +120,10 @@ impl Responder for SubsonicResponder {
 		};
 
 		if format == "jsonp" {
-			let callback =
-				serde_urlencoded::from_str::<HashMap<String, String>>(req.query_string())
-					.ok()
-					.and_then(|mut q| q.remove("callback"))
-					.unwrap_or_else(|| "subsonicCallback".to_string());
+			let callback = serde_qs::from_str::<HashMap<String, String>>(req.query_string())
+				.ok()
+				.and_then(|mut q| q.remove("callback"))
+				.unwrap_or_else(|| "subsonicCallback".to_string());
 
 			HttpResponse::Ok()
 				.content_type("application/javascript")
