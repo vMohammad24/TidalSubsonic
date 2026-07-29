@@ -15,24 +15,34 @@ fn format_date(date_str: Option<&str>) -> String {
 		_ => return String::new(),
 	};
 
-	if let Ok(dt) = DateTime::parse_from_rfc3339(date_str) {
-		return dt.with_timezone(&Utc).to_rfc3339();
-	}
-
-	if let Ok(dt) = DateTime::parse_from_str(date_str, "%Y-%m-%dT%H:%M:%S%.3f%z") {
-		return dt.with_timezone(&Utc).to_rfc3339();
-	}
-
-	if let Ok(nd) = NaiveDate::parse_from_str(date_str, "%Y-%m-%d") {
-		return nd.and_hms_opt(0, 0, 0).unwrap().and_utc().to_rfc3339();
-	}
-
-	if let Ok(nd) = NaiveDate::parse_from_str(&format!("{}-01", date_str), "%Y-%m-%d") {
-		return nd.and_hms_opt(0, 0, 0).unwrap().and_utc().to_rfc3339();
-	}
-
-	if let Ok(nd) = NaiveDate::parse_from_str(&format!("{}-01-01", date_str), "%Y-%m-%d") {
-		return nd.and_hms_opt(0, 0, 0).unwrap().and_utc().to_rfc3339();
+	if date_str.contains('T') {
+		if let Ok(dt) = DateTime::parse_from_rfc3339(date_str) {
+			return dt.with_timezone(&Utc).to_rfc3339();
+		}
+		if let Ok(dt) = DateTime::parse_from_str(date_str, "%Y-%m-%dT%H:%M:%S%.3f%z") {
+			return dt.with_timezone(&Utc).to_rfc3339();
+		}
+	} else {
+		match date_str.len() {
+			10 => {
+				if let Ok(nd) = NaiveDate::parse_from_str(date_str, "%Y-%m-%d") {
+					return nd.and_hms_opt(0, 0, 0).unwrap().and_utc().to_rfc3339();
+				}
+			}
+			7 => {
+				if let Ok(nd) = NaiveDate::parse_from_str(&format!("{}-01", date_str), "%Y-%m-%d") {
+					return nd.and_hms_opt(0, 0, 0).unwrap().and_utc().to_rfc3339();
+				}
+			}
+			4 => {
+				if let Ok(nd) =
+					NaiveDate::parse_from_str(&format!("{}-01-01", date_str), "%Y-%m-%d")
+				{
+					return nd.and_hms_opt(0, 0, 0).unwrap().and_utc().to_rfc3339();
+				}
+			}
+			_ => {}
+		}
 	}
 
 	String::new()
