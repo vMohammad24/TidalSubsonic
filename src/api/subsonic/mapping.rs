@@ -1,6 +1,7 @@
 use crate::api::subsonic::middleware::SubsonicContext;
 use crate::api::subsonic::models::{Album, Artist, Playlist, Song};
 use crate::db::LocalPlaylistWithCount;
+use crate::tidal::api::ARTIST_ALBUM_COUNT_CACHE;
 use crate::tidal::favorites::{get_favorite_date, get_local_favorite_date};
 use crate::tidal::models::entities::{
 	Album as TidalAlbum, Artist as TidalArtist, Playlist as TidalPlaylist, Track as TidalTrack,
@@ -100,7 +101,7 @@ pub fn map_tidal_artist_to_subsonic(
 		id: artist.id.to_string(),
 		name: artist.name.clone(),
 		cover_art: cover_art.clone(),
-		album_count: 1, // TODO: this isnt provided anywhere, we can cache it for the artists we know tho?
+		album_count: ARTIST_ALBUM_COUNT_CACHE.get(&artist.id).unwrap_or(1),
 		album: None,
 		starred: starred.map(|d| format_date(Some(&d))),
 		artist_image_url,

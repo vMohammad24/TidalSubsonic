@@ -43,6 +43,13 @@ pub static MISC_CACHE: LazyLock<Cache<String, serde_json::Value>> = LazyLock::ne
 		.build()
 });
 
+pub static ARTIST_ALBUM_COUNT_CACHE: LazyLock<SyncCache<i64, i32>> = LazyLock::new(|| {
+	SyncCache::builder()
+		.time_to_live(Duration::from_secs(7200))
+		.max_capacity(100000)
+		.build()
+});
+
 // id : etag
 // pub static PLAYLIST_CACHE: LazyLock<Cache<String, String>> = LazyLock::new(|| {
 // 	Cache::builder()
@@ -398,7 +405,8 @@ impl TidalApi {
 		limit: u32,
 		offset: u32,
 	) -> Result<crate::tidal::models::SearchResultItems<Album>, TidalError> {
-		self.session
+		let result = self
+			.session
 			.request::<crate::tidal::models::SearchResultItems<Album>>(
 				Method::GET,
 				&format!("/artists/{}/albums", artist_id),
@@ -409,7 +417,15 @@ impl TidalApi {
 				None,
 				crate::tidal::session::ApiVersion::V1,
 			)
-			.await
+			.await;
+
+		if let Ok(ref albums) = result
+			&& let Some(total) = albums.total_number_of_items
+		{
+			ARTIST_ALBUM_COUNT_CACHE.insert(artist_id, total);
+		}
+
+		result
 	}
 
 	pub async fn get_artist_top_tracks(
