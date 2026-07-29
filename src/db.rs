@@ -705,38 +705,27 @@ impl DbManager {
 	) -> Result<std::collections::HashMap<i64, String>, sqlx::Error> {
 		let mut favorites = std::collections::HashMap::new();
 
-		let tracks = sqlx::query!(
-			"SELECT track_id, created_at FROM local_favorite_tracks WHERE username = $1",
-			username
-		)
-		.fetch_all(&self.pool)
-		.await?;
-		for row in tracks {
-			if let Ok(id) = row.track_id.parse::<i64>() {
-				favorites.insert(id, row.created_at.to_rfc3339());
-			}
+		#[derive(sqlx::FromRow)]
+		struct FavoriteRow {
+			item_id: String,
+			created_at: chrono::DateTime<chrono::Utc>,
 		}
 
-		let albums = sqlx::query!(
-			"SELECT album_id, created_at FROM local_favorite_albums WHERE username = $1",
-			username
+		let rows = sqlx::query_as::<_, FavoriteRow>(
+			r#"
+			SELECT track_id AS item_id, created_at FROM local_favorite_tracks WHERE username = $1
+			UNION ALL
+			SELECT album_id AS item_id, created_at FROM local_favorite_albums WHERE username = $1
+			UNION ALL
+			SELECT artist_id AS item_id, created_at FROM local_favorite_artists WHERE username = $1
+			"#,
 		)
+		.bind(username)
 		.fetch_all(&self.pool)
 		.await?;
-		for row in albums {
-			if let Ok(id) = row.album_id.parse::<i64>() {
-				favorites.insert(id, row.created_at.to_rfc3339());
-			}
-		}
 
-		let artists = sqlx::query!(
-			"SELECT artist_id, created_at FROM local_favorite_artists WHERE username = $1",
-			username
-		)
-		.fetch_all(&self.pool)
-		.await?;
-		for row in artists {
-			if let Ok(id) = row.artist_id.parse::<i64>() {
+		for row in rows {
+			if let Ok(id) = row.item_id.parse::<i64>() {
 				favorites.insert(id, row.created_at.to_rfc3339());
 			}
 		}
