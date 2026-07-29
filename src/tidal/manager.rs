@@ -11,20 +11,20 @@ use crate::tidal::{
 use crate::util::crypto::{decrypt_string, encrypt_string};
 use chrono::{TimeZone, Utc};
 use moka::future::Cache;
-use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
+use tokio::sync::mpsc::{Sender, channel};
 
 pub struct TidalClientManager {
 	user_clients: Arc<RwLock<HashMap<String, Arc<Session>>>>,
 	global_client: Arc<Session>,
 	default_country_code: String,
 	pub db: Arc<DbManager>,
-	token_update_tx: UnboundedSender<TokenUpdate>,
+	token_update_tx: Sender<TokenUpdate>,
 	subsonic_user_cache: Cache<String, Arc<Session>>,
 }
 
 impl TidalClientManager {
 	pub fn new(default_country_code: &str, db: Arc<DbManager>) -> Self {
-		let (tx, mut rx) = unbounded_channel::<TokenUpdate>();
+		let (tx, mut rx) = channel::<TokenUpdate>(100);
 		let db_clone = db.clone();
 
 		tokio::spawn(async move {

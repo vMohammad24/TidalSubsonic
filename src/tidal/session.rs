@@ -8,7 +8,7 @@ use chrono::Utc;
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, RwLock};
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::mpsc::Sender;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
 pub enum ApiVersion {
@@ -69,14 +69,11 @@ pub struct Session {
 	client: reqwest::Client,
 	pub options: Arc<RwLock<SessionOptions>>,
 	pub user_id: Option<i64>,
-	pub token_update_tx: Option<UnboundedSender<TokenUpdate>>,
+	pub token_update_tx: Option<Sender<TokenUpdate>>,
 }
 
 impl Session {
-	pub fn new(
-		options: SessionOptions,
-		token_update_tx: Option<UnboundedSender<TokenUpdate>>,
-	) -> Self {
+	pub fn new(options: SessionOptions, token_update_tx: Option<Sender<TokenUpdate>>) -> Self {
 		let client = http_client();
 
 		Self {
@@ -376,13 +373,22 @@ impl Session {
 		if let Some(user_id) = self.user_id
 			&& let Some(tx) = &self.token_update_tx
 		{
-			let opts = self.options.read().unwrap_or_else(|e| e.into_inner());
-			let _ = tx.send(TokenUpdate {
-				user_id,
-				access_token: opts.access_token.clone().unwrap_or_default(),
-				refresh_token: opts.refresh_token.clone(),
-				token_expiry: opts.token_expiry,
-			});
+			let (access_token, refresh_token, token_expiry) = {
+				let opts = self.options.read().unwrap_or_else(|e| e.into_inner());
+				(
+					opts.access_token.clone().unwrap_or_default(),
+					opts.refresh_token.clone(),
+					opts.token_expiry,
+				)
+			};
+			let _ = tx
+				.send(TokenUpdate {
+					user_id,
+					access_token,
+					refresh_token,
+					token_expiry,
+				})
+				.await;
 		}
 
 		Ok(token_resp)
