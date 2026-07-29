@@ -115,9 +115,17 @@ struct Manifest {
 	urls: Vec<String>,
 }
 
-struct DashManifest {
-	mime_type: String,
-	urls: Vec<String>,
+pub(crate) struct DashManifest {
+	pub(crate) mime_type: String,
+	pub(crate) urls: Vec<String>,
+}
+
+pub struct DashManifestParser;
+
+impl DashManifestParser {
+	pub fn parse(xml: &str) -> Result<DashManifest, String> {
+		parse_dash_manifest(xml)
+	}
 }
 
 fn parse_dash_manifest(xml: &str) -> Result<DashManifest, String> {
@@ -292,7 +300,7 @@ pub async fn download(
 						.finish();
 				}
 			} else if mime_type == "application/dash+xml"
-				&& let Ok(manifest) = parse_dash_manifest(&decoded_str)
+				&& let Ok(manifest) = DashManifestParser::parse(&decoded_str)
 			{
 				let content_type = if manifest.mime_type.is_empty() {
 					"audio/flac".to_string()
@@ -386,7 +394,7 @@ pub async fn download(
 					let _ = writer.close().await;
 				}
 			} else if mime_type == "application/dash+xml"
-				&& let Ok(manifest) = parse_dash_manifest(&decoded_str)
+				&& let Ok(manifest) = DashManifestParser::parse(&decoded_str)
 			{
 				let actual_mime = if manifest.mime_type.is_empty() {
 					"audio/flac"
@@ -483,7 +491,7 @@ pub async fn stream(
 				.finish();
 		}
 	} else if mime_type == "application/dash+xml" {
-		match parse_dash_manifest(&decoded_str) {
+		match DashManifestParser::parse(&decoded_str) {
 			Ok(manifest) => {
 				let client = http_client();
 				let urls = manifest.urls;
