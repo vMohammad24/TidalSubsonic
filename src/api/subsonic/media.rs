@@ -351,7 +351,7 @@ pub async fn download(
 		}
 	}
 
-	let (zip_writer, zip_reader) = tokio::io::duplex(52_428_800);
+	let (zip_writer, zip_reader) = tokio::io::duplex(4 * 1024 * 1024);
 	let http_stream = ReaderStream::new(zip_reader);
 
 	tokio::spawn(async move {
