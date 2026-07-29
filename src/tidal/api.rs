@@ -1,11 +1,15 @@
 use crate::tidal::{
 	error::TidalError,
 	favorites::{add_favorite, get_favorites_count, remove_favorite, set_favorites_map},
-	models::{Album, Artist, Playlist, SearchResult, Track},
+	models::{
+		Album, Artist, JsonApiDocument, MixEndpointResponse, MixIncluded, MixPlaylistResource,
+		Playlist, PlaylistDetailIncluded, SearchResult, Track,
+	},
 	session::{ApiVersion, Session},
 };
 use chrono::Utc;
 use moka::future::Cache;
+use moka::sync::Cache as SyncCache;
 use reqwest::Method;
 use std::sync::LazyLock;
 use std::time::Duration;
@@ -58,6 +62,17 @@ pub static ARTIST_ALBUM_COUNT_CACHE: LazyLock<SyncCache<i64, i32>> = LazyLock::n
 // 		.build()
 // });
 
+use crate::tidal::models::entities::ArtworkAttrs;
+
+fn best_artwork_url(attrs: &ArtworkAttrs) -> Option<String> {
+	let files = attrs.files.as_ref()?;
+	files
+		.iter()
+		.find(|f| f.meta.width == 320 && f.meta.height == 320)
+		.map(|f| f.href.clone())
+		.or_else(|| files.first().map(|f| f.href.clone()))
+}
+
 #[derive(Clone)]
 pub struct TidalApi {
 	session: Arc<Session>,
@@ -94,6 +109,9 @@ impl TidalApi {
 					.insert(cache_key, serde_json::Value::Bool(true))
 					.await;
 
+				let mut favorite_track_ids: Vec<i64> = Vec::new();
+				let mut favorite_artist_ids: Vec<i64> = Vec::new();
+
 				if let Ok(albums) = api.get_favorite_albums(user_id, 5000, 0).await {
 					for album in albums.items {
 						album.item.cache();
@@ -105,12 +123,14 @@ impl TidalApi {
 					for track in tracks.items {
 						track.item.cache();
 						favorites.insert(track.item.id, track.created);
+						favorite_track_ids.push(track.item.id);
 					}
 				}
 				if let Ok(artists) = api.get_favorite_artists(user_id, 5000, 0).await {
 					for artist in artists.items {
 						artist.item.cache();
 						favorites.insert(artist.item.id, artist.created);
+						favorite_artist_ids.push(artist.item.id);
 					}
 				}
 
@@ -149,6 +169,39 @@ impl TidalApi {
 					}
 					Err(e) => tracing::debug!(error = %e, "Failed to preload playlists"),
 				}
+
+				tokio::join!(
+					async {
+						match api.get_user_mixes().await {
+							Ok(mixes) => {
+								tracing::debug!(count = %mixes.len(), "Preloaded user mixes");
+							}
+							Err(e) => tracing::debug!(error = %e, "Failed to preload user mixes"),
+						}
+					},
+					async {
+						for fav_track_id in favorite_track_ids.iter().take(5) {
+							if let Ok(recs) =
+								api.get_track_recommendations(*fav_track_id, 20, 0).await
+							{
+								for rec in &recs.items {
+									rec.track.cache();
+								}
+							}
+						}
+					},
+					async {
+						for fav_artist_id in favorite_artist_ids.iter().take(20) {
+							if let Ok(tracks) =
+								api.get_artist_top_tracks(*fav_artist_id, 20, 0).await
+							{
+								for track in &tracks.items {
+									track.cache();
+								}
+							}
+						}
+					},
+				);
 			});
 		} else {
 			tracing::debug!("No user id available for preload");
@@ -303,6 +356,174 @@ impl TidalApi {
 				ApiVersion::V1,
 			)
 			.await
+	}
+
+	pub async fn get_user_mixes(
+		&self,
+	) -> Result<Vec<crate::tidal::models::entities::MixPlaylistInfo>, TidalError> {
+		let user_id = self.user_id().ok_or(TidalError::Authentication(
+			"No authenticated user for mix fetch".to_string(),
+		))?;
+		let cache_key = format!("mixes_{}", user_id);
+
+		if let Some(cached) = MISC_CACHE.get(&cache_key).await
+			&& let Ok(mixes) = serde_json::from_value::<
+				Vec<crate::tidal::models::entities::MixPlaylistInfo>,
+			>(cached)
+		{
+			return Ok(mixes);
+		}
+
+		let mix_endpoints = [
+			"/userDailyMixes/me",
+			"/userDiscoveryMixes/me",
+			"/userNewReleaseMixes/me",
+			"/userOfflineMixes/me",
+		];
+
+		let mut all_mixes: Vec<crate::tidal::models::entities::MixPlaylistInfo> = Vec::new();
+
+		for endpoint in &mix_endpoints {
+			match self
+				.session
+				.request::<MixEndpointResponse>(
+					Method::GET,
+					endpoint,
+					Some(&[("include", "items,items.coverArt")]),
+					None,
+					ApiVersion::OpenApi,
+				)
+				.await
+			{
+				Ok(resp) => {
+					if let Some(included) = resp.included {
+						let mut art_to_url: HashMap<String, String> = HashMap::new();
+						let mut playlist_items: Vec<MixPlaylistResource> = Vec::new();
+
+						for item in included {
+							match item {
+								MixIncluded::Playlist(pl) => playlist_items.push(pl),
+								MixIncluded::Artwork { id, attributes } => {
+									if let Some(url) = best_artwork_url(&attributes) {
+										art_to_url.insert(id, url);
+									}
+								}
+								MixIncluded::Unknown => {}
+							}
+						}
+
+						for pl in playlist_items {
+							let cover_art = pl
+								.relationships
+								.and_then(|r| r.cover_art)
+								.and_then(|ca| ca.data)
+								.and_then(|d| d.into_iter().next())
+								.and_then(|d| art_to_url.get(&d.id).cloned());
+
+							all_mixes.push(crate::tidal::models::entities::MixPlaylistInfo {
+								id: pl.id.clone(),
+								name: pl.attributes.name.unwrap_or_else(|| "Mix".to_string()),
+								description: pl.attributes.description,
+								cover_art,
+							});
+						}
+					}
+					tracing::debug!(
+						endpoint = %endpoint,
+						found = %all_mixes.len(),
+						"Fetched mix playlists"
+					);
+				}
+				Err(e) => {
+					tracing::warn!(endpoint = %endpoint, error = %e, "Failed to fetch mix endpoint");
+				}
+			}
+		}
+
+		if let Ok(json) = serde_json::to_value(&all_mixes) {
+			MISC_CACHE.insert(cache_key, json).await;
+		}
+
+		Ok(all_mixes)
+	}
+
+	fn parse_iso_duration(s: &str) -> (i64, i64) {
+		let s = match s.strip_prefix("PT") {
+			Some(rest) => rest,
+			None => {
+				tracing::warn!(raw = %s, "ISO duration missing PT prefix, expected track duration");
+				return (0, 0);
+			}
+		};
+		let mut minutes = 0i64;
+		let mut seconds = 0i64;
+		let remaining = if let Some(h_pos) = s.find('H') {
+			minutes += s[..h_pos].parse::<i64>().unwrap_or(0) * 60;
+			&s[h_pos + 1..]
+		} else {
+			s
+		};
+		if let Some(m_pos) = remaining.find('M') {
+			minutes += remaining[..m_pos].parse().unwrap_or(0);
+			let after = &remaining[m_pos + 1..];
+			if let Some(s_pos) = after.find('S') {
+				seconds = after[..s_pos].parse().unwrap_or(0);
+			}
+		} else if let Some(s_pos) = remaining.find('S') {
+			seconds = remaining[..s_pos].parse().unwrap_or(0);
+		}
+		(minutes, seconds)
+	}
+
+	pub async fn get_openapi_playlist_detail(
+		&self,
+		playlist_id: &str,
+	) -> Result<crate::tidal::models::entities::PlaylistDetail, TidalError> {
+		let doc = self
+			.session
+			.request::<JsonApiDocument<crate::tidal::models::PlaylistAttributesV2, PlaylistDetailIncluded>>(
+				Method::GET,
+				&format!("/playlists/{}", playlist_id),
+				Some(&[("include", "items,coverArt")]),
+				None,
+				ApiVersion::OpenApi,
+			)
+			.await?;
+
+		let attrs = doc.data.attributes;
+		let mut duration_secs: i64 = 0;
+		let mut track_ids = Vec::new();
+		let mut cover_art: Option<String> = None;
+
+		if let Some(included) = doc.included {
+			for item in included {
+				match item {
+					PlaylistDetailIncluded::Track { id, attributes } => {
+						track_ids.push(id);
+						if let Some(dur_str) = attributes.duration {
+							let (m, s) = Self::parse_iso_duration(&dur_str);
+							duration_secs += m * 60 + s;
+						}
+					}
+					PlaylistDetailIncluded::Artwork { attributes } => {
+						if cover_art.is_none() {
+							cover_art = best_artwork_url(&attributes);
+						}
+					}
+					PlaylistDetailIncluded::Unknown => {}
+				}
+			}
+		}
+
+		Ok(crate::tidal::models::entities::PlaylistDetail {
+			id: doc.data.id,
+			name: attrs.name,
+			description: attrs.description,
+			song_count: attrs.number_of_items.unwrap_or(track_ids.len() as i32),
+			duration_secs,
+			cover_art,
+			track_ids,
+		})
 	}
 
 	pub fn get_image_url(&self, id: &str, width: u32, height: u32) -> String {
@@ -506,26 +727,6 @@ impl TidalApi {
 			)
 			.await
 	}
-	#[allow(dead_code)]
-	pub async fn get_new_releases(
-		&self,
-		limit: u32,
-		offset: u32,
-	) -> Result<crate::tidal::models::SearchResultItems<Album>, TidalError> {
-		self.session
-			.request::<crate::tidal::models::SearchResultItems<Album>>(
-				reqwest::Method::GET,
-				"/pages/new_releases",
-				Some(&[
-					("limit", &limit.to_string()),
-					("offset", &offset.to_string()),
-				]),
-				None,
-				crate::tidal::session::ApiVersion::V1,
-			)
-			.await
-	}
-
 	pub async fn get_favorite_tracks(
 		&self,
 		user_id: i64,

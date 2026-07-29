@@ -196,7 +196,7 @@ use crate::api::subsonic::mapping::{
 	map_local_playlist_to_subsonic, map_tidal_playlist_to_subsonic, map_tidal_track_to_subsonic,
 };
 use crate::api::subsonic::models::{Playlist as SubsonicPlaylist, Playlists};
-use futures_util::StreamExt;
+use futures_util::{StreamExt, future::join_all};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -210,32 +210,56 @@ pub async fn get_playlists(
 	db: web::Data<Arc<crate::db::DbManager>>,
 ) -> impl Responder {
 	let mut resp = SubsonicResponseWrapper::ok();
+	let api = subsonic_ctx.tidal_api.clone();
+	let mut all_playlists = Vec::new();
 
 	if subsonic_ctx.use_playlists {
 		if let Ok(playlists) = db.get_local_playlists(&subsonic_ctx.user).await {
-			let mapped: Vec<SubsonicPlaylist> = playlists
-				.into_iter()
-				.map(|p| map_local_playlist_to_subsonic(&p))
-				.collect();
-			resp.response.playlists = Some(Playlists { playlist: mapped });
+			for p in playlists {
+				all_playlists.push(map_local_playlist_to_subsonic(&p));
+			}
 		}
-		return SubsonicResponder(resp);
+	} else {
+		if let Some(user_id) = api.user_id()
+			&& let Ok(playlists_result) = api.get_user_playlists(user_id).await
+		{
+			for p in playlists_result.items {
+				all_playlists.push(map_tidal_playlist_to_subsonic(&p, Some(&subsonic_ctx.user)));
+			}
+		}
+
+		if let Ok(mixes) = api.get_user_mixes().await {
+			let fetch_futures: Vec<_> = mixes
+				.iter()
+				.map(|mix| {
+					let api = api.clone();
+					let id = mix.id.clone();
+					async move { api.get_openapi_playlist_detail(&id).await.ok() }
+				})
+				.collect();
+			let details = join_all(fetch_futures).await;
+
+			for detail in details.into_iter().flatten() {
+				all_playlists.push(SubsonicPlaylist {
+					id: format!("v2_{}", detail.id),
+					name: detail.name,
+					owner: Some("Tidal".to_string()),
+					public: Some(false),
+					song_count: detail.song_count,
+					duration: detail.duration_secs,
+					created: "1970-01-01T00:00:00Z".to_string(),
+					changed: None,
+					cover_art: detail.cover_art,
+					comment: detail.description,
+					entry: None,
+				});
+			}
+		}
 	}
 
-	let api = subsonic_ctx.tidal_api.clone();
-
-	if let Some(user_id) = api.user_id()
-		&& let Ok(playlists_result) = api.get_user_playlists(user_id).await
-	{
-		let mapped: Vec<SubsonicPlaylist> = playlists_result
-			.items
-			.into_iter()
-			.map(|p| map_tidal_playlist_to_subsonic(&p, Some(&subsonic_ctx.user)))
-			.collect();
-
-		resp.response.playlists = Some(Playlists { playlist: mapped });
-	}
-
+	resp.response.playlists = Some(Playlists {
+		playlist: all_playlists,
+	});
 	SubsonicResponder(resp)
 }
 
@@ -246,6 +270,63 @@ pub async fn get_playlist(
 ) -> impl Responder {
 	let mut resp = SubsonicResponseWrapper::ok();
 	let api = subsonic_ctx.tidal_api.clone();
+
+	if let Some(actual_id) = query.id.strip_prefix("v2_") {
+		match api.get_openapi_playlist_detail(actual_id).await {
+			Ok(detail) => {
+				let api_clone = api.clone();
+				let ctx = subsonic_ctx.clone();
+				let cover = detail.cover_art.clone();
+
+				let songs: Vec<_> = futures_util::stream::iter(detail.track_ids)
+					.map(|track_id| {
+						let api = api_clone.clone();
+						let ctx = ctx.clone();
+						async move {
+							match track_id.parse::<i64>() {
+								Ok(track_id_i64) => match api.get_track(track_id_i64).await {
+									Ok(track) => {
+										Some(map_tidal_track_to_subsonic(&track, Some(&ctx), None, None))
+									}
+									Err(e) => {
+										tracing::warn!(track_id = %track_id_i64, error = ?e, "Failed to fetch track for mix playlist");
+										None
+									}
+								},
+								Err(e) => {
+									tracing::error!(track_id = %track_id, error = ?e, "Failed to parse mix track ID");
+									None
+								}
+							}
+						}
+					})
+					.buffered(50)
+					.filter_map(|s| async { s })
+					.collect()
+					.await;
+
+				let sub_playlist = SubsonicPlaylist {
+					id: query.id.clone(),
+					name: detail.name,
+					owner: Some("Tidal".to_string()),
+					public: Some(false),
+					song_count: detail.song_count,
+					duration: detail.duration_secs,
+					created: "1970-01-01T00:00:00Z".to_string(),
+					changed: None,
+					cover_art: cover,
+					comment: detail.description,
+					entry: Some(songs),
+				};
+				resp.response.playlist = Some(sub_playlist);
+			}
+			Err(e) => {
+				tracing::warn!(playlist_id = %actual_id, error = %e, "Failed to fetch v2 mix playlist");
+				resp = SubsonicResponseWrapper::error(70, "Mix playlist not found");
+			}
+		}
+		return SubsonicResponder(resp);
+	}
 
 	if subsonic_ctx.use_playlists {
 		let id = match Uuid::parse_str(&query.id) {

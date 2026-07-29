@@ -119,10 +119,129 @@ pub struct JsonApiResponse<A> {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct JsonApiDocument<A, I> {
+	pub data: JsonApiResource<A>,
+	pub included: Option<Vec<I>>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct PlaylistAttributesV2 {
 	pub name: String,
 	pub description: Option<String>,
+	pub playlist_type: Option<String>,
+	pub created: Option<String>,
+	pub last_updated: Option<String>,
+	pub duration: Option<String>,
+	pub number_of_items: Option<i32>,
+	pub number_of_followers: Option<i32>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ArtworkFileMeta {
+	pub width: i32,
+	pub height: i32,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ArtworkFile {
+	pub href: String,
+	pub meta: ArtworkFileMeta,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ArtworkAttrs {
+	pub media_type: Option<String>,
+	pub files: Option<Vec<ArtworkFile>>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct PlaylistDetail {
+	pub id: String,
+	pub name: String,
+	pub description: Option<String>,
+	pub song_count: i32,
+	pub duration_secs: i64,
+	pub cover_art: Option<String>,
+	pub track_ids: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct MixPlaylistInfo {
+	pub id: String,
+	pub name: String,
+	pub description: Option<String>,
+	pub cover_art: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MixEndpointResponse {
+	pub included: Option<Vec<MixIncluded>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type")]
+pub enum MixIncluded {
+	#[serde(rename = "playlists")]
+	Playlist(MixPlaylistResource),
+	#[serde(rename = "artworks")]
+	Artwork {
+		id: String,
+		attributes: ArtworkAttrs,
+	},
+	#[serde(other)]
+	Unknown,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MixPlaylistResource {
+	pub id: String,
+	pub attributes: MixPlaylistAttrs,
+	pub relationships: Option<MixPlaylistRelationships>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MixPlaylistAttrs {
+	pub name: Option<String>,
+	pub description: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MixPlaylistRelationships {
+	#[serde(rename = "coverArt")]
+	pub cover_art: Option<MixCoverArtRelationship>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MixCoverArtRelationship {
+	pub data: Option<Vec<MixCoverArtData>>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MixCoverArtData {
+	pub id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type")]
+pub enum PlaylistDetailIncluded {
+	#[serde(rename = "tracks")]
+	Track {
+		id: String,
+		attributes: PlaylistDetailTrackAttrs,
+	},
+	#[serde(rename = "artworks")]
+	Artwork { attributes: ArtworkAttrs },
+	#[serde(other)]
+	Unknown,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaylistDetailTrackAttrs {
+	pub duration: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
