@@ -581,6 +581,15 @@ impl SubsonicResponseWrapper {
 		}
 	}
 
+	pub fn from_upstream_error<E: std::fmt::Debug>(err: &E) -> Self {
+		let msg = if cfg!(debug_assertions) {
+			format!("Tidal API Error: {:?}", err)
+		} else {
+			"Upstream dependency failed".to_string()
+		};
+		Self::error(0, &msg)
+	}
+
 	pub fn with_lyrics(mut self, lyrics: SubsonicLyrics) -> Self {
 		self.response.lyrics = Some(lyrics);
 		self

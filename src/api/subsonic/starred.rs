@@ -213,14 +213,6 @@ pub async fn get_starred(
 	SubsonicResponder(resp)
 }
 
-pub async fn get_starred2(
-	req: actix_web::HttpRequest,
-	subsonic_ctx: actix_web::web::ReqData<crate::api::subsonic::middleware::SubsonicContext>,
-	db: web::Data<Arc<DbManager>>,
-) -> impl Responder {
-	get_starred(req, subsonic_ctx, db).await
-}
-
 #[derive(Deserialize)]
 pub struct StarQuery {
 	pub id: Option<String>,

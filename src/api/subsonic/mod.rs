@@ -14,187 +14,84 @@ pub mod user;
 
 use actix_web::web;
 
+macro_rules! sub_route {
+	($cfg:expr, $path:expr, $handler:path) => {
+		$cfg = $cfg
+			.route($path, actix_web::web::get().to($handler))
+			.route(concat!($path, ".view"), actix_web::web::get().to($handler))
+	};
+}
+
 pub fn config(cfg: &mut web::ServiceConfig) {
-	cfg.service(
-		web::scope("/rest")
-			.wrap(crate::api::subsonic::middleware::SubsonicAuth)
-			.route("/ping", web::get().to(system::ping))
-			.route("/ping.view", web::get().to(system::ping))
-			.route("/getCoverArt", web::get().to(media::get_cover_art))
-			.route("/getCoverArt.view", web::get().to(media::get_cover_art))
-			.route("/getLicense", web::get().to(system::get_license))
-			.route("/getLicense.view", web::get().to(system::get_license))
-			.route(
-				"/getOpenSubsonicExtensions",
-				web::get().to(system::get_open_subsonic_extensions),
-			)
-			.route(
-				"/getOpenSubsonicExtensions.view",
-				web::get().to(system::get_open_subsonic_extensions),
-			)
-			.route("/search3", web::get().to(search::search3))
-			.route("/search3.view", web::get().to(search::search3))
-			.route("/search", web::get().to(search::search2))
-			.route("/search.view", web::get().to(search::search2))
-			.route("/search2", web::get().to(search::search2))
-			.route("/search2.view", web::get().to(search::search2))
-			// Browsing
-			.route(
-				"/getMusicFolders",
-				web::get().to(browsing::get_music_folders),
-			)
-			.route(
-				"/getMusicFolders.view",
-				web::get().to(browsing::get_music_folders),
-			)
-			.route(
-				"/getMusicDirectory",
-				web::get().to(browsing::get_music_directory),
-			)
-			.route(
-				"/getMusicDirectory.view",
-				web::get().to(browsing::get_music_directory),
-			)
-			.route("/getIndexes", web::get().to(browsing::get_indexes))
-			.route("/getIndexes.view", web::get().to(browsing::get_indexes))
-			.route("/getTopSongs", web::get().to(browsing::get_top_songs))
-			.route("/getTopSongs.view", web::get().to(browsing::get_top_songs))
-			.route(
-				"/getSimilarSongs",
-				web::get().to(browsing::get_similar_songs),
-			)
-			.route(
-				"/getSimilarSongs.view",
-				web::get().to(browsing::get_similar_songs),
-			)
-			.route("/getArtists", web::get().to(browsing::get_artists))
-			.route("/getArtists.view", web::get().to(browsing::get_artists))
-			.route("/getArtistInfo", web::get().to(browsing::get_artist_info))
-			.route(
-				"/getArtistInfo.view",
-				web::get().to(browsing::get_artist_info),
-			)
-			.route("/getArtistInfo2", web::get().to(browsing::get_artist_info2))
-			.route(
-				"/getArtistInfo2.view",
-				web::get().to(browsing::get_artist_info2),
-			)
-			.route("/getRandomSongs", web::get().to(browsing::get_random_songs))
-			.route(
-				"/getRandomSongs.view",
-				web::get().to(browsing::get_random_songs),
-			)
-			.route(
-				"/getSongsByGenre",
-				web::get().to(browsing::get_songs_by_genre),
-			)
-			.route(
-				"/getSongsByGenre.view",
-				web::get().to(browsing::get_songs_by_genre),
-			)
-			.route("/getGenres", web::get().to(browsing::get_genres))
-			.route("/getGenres.view", web::get().to(browsing::get_genres))
-			.route(
-				"/getInternetRadioStations",
-				web::get().to(browsing::get_internet_radio_stations),
-			)
-			.route(
-				"/getInternetRadioStations.view",
-				web::get().to(browsing::get_internet_radio_stations),
-			)
-			.route("/getAlbumList", web::get().to(browsing::get_album_list))
-			.route(
-				"/getAlbumList.view",
-				web::get().to(browsing::get_album_list),
-			)
-			.route("/getAlbumList2", web::get().to(browsing::get_album_list))
-			.route(
-				"/getAlbumList2.view",
-				web::get().to(browsing::get_album_list),
-			)
-			.route("/getAlbum", web::get().to(browsing::get_album))
-			.route("/getAlbum.view", web::get().to(browsing::get_album))
-			.route("/getArtist", web::get().to(browsing::get_artist))
-			.route("/getArtist.view", web::get().to(browsing::get_artist))
-			.route("/getAlbumInfo", web::get().to(browsing::get_album_info))
-			.route(
-				"/getAlbumInfo.view",
-				web::get().to(browsing::get_album_info),
-			)
-			.route("/getAlbumInfo2", web::get().to(browsing::get_album_info2))
-			.route(
-				"/getAlbumInfo2.view",
-				web::get().to(browsing::get_album_info2),
-			)
-			.route("/getSong", web::get().to(browsing::get_song))
-			.route("/getSong.view", web::get().to(browsing::get_song))
-			// Playlists
-			.route("/getPlaylists", web::get().to(playlists::get_playlists))
-			.route(
-				"/getPlaylists.view",
-				web::get().to(playlists::get_playlists),
-			)
-			.route("/getPlaylist", web::get().to(playlists::get_playlist))
-			.route("/getPlaylist.view", web::get().to(playlists::get_playlist))
-			.route("/createPlaylist", web::get().to(playlists::create_playlist))
-			.route(
-				"/createPlaylist.view",
-				web::get().to(playlists::create_playlist),
-			)
-			.route("/deletePlaylist", web::get().to(playlists::delete_playlist))
-			.route(
-				"/deletePlaylist.view",
-				web::get().to(playlists::delete_playlist),
-			)
-			.route("/updatePlaylist", web::get().to(playlists::update_playlist))
-			.route(
-				"/updatePlaylist.view",
-				web::get().to(playlists::update_playlist),
-			)
-			// Media (excluding getCoverArt which is public)
-			.route("/stream", web::get().to(media::stream))
-			.route("/stream.view", web::get().to(media::stream))
-			.route("/download", web::get().to(media::download))
-			.route("/download.view", web::get().to(media::download))
-			.route("/getLyrics", web::get().to(media::get_lyrics))
-			.route("/getLyrics.view", web::get().to(media::get_lyrics))
-			.route("/getLyricsBySongId", web::get().to(media::get_lyrics))
-			.route("/getLyricsBySongId.view", web::get().to(media::get_lyrics))
-			// User
-			.route("/getUser", web::get().to(user::get_user))
-			.route("/getUser.view", web::get().to(user::get_user))
-			.route("/getAvatar", web::get().to(user::get_avatar))
-			.route("/getAvatar.view", web::get().to(user::get_avatar))
-			// Starred
-			.route("/getStarred", web::get().to(starred::get_starred))
-			.route("/getStarred.view", web::get().to(starred::get_starred))
-			.route("/getStarred2", web::get().to(starred::get_starred2))
-			.route("/getStarred2.view", web::get().to(starred::get_starred2))
-			.route("/star", web::get().to(starred::star))
-			.route("/star.view", web::get().to(starred::star))
-			.route("/unstar", web::get().to(starred::unstar))
-			.route("/unstar.view", web::get().to(starred::unstar))
-			// Interaction
-			.route("/setRating", web::get().to(interaction::set_rating))
-			.route("/setRating.view", web::get().to(interaction::set_rating))
-			.route("/scrobble", web::get().to(interaction::scrobble))
-			.route("/scrobble.view", web::get().to(interaction::scrobble))
-			.route("/getQueue", web::get().to(interaction::get_queue))
-			.route("/getQueue.view", web::get().to(interaction::get_queue))
-			.route("/saveQueue", web::get().to(interaction::save_queue))
-			.route("/saveQueue.view", web::get().to(interaction::save_queue))
-			.route("/getPlayQueue", web::get().to(interaction::get_play_queue))
-			.route(
-				"/getPlayQueue.view",
-				web::get().to(interaction::get_play_queue),
-			)
-			.route(
-				"/savePlayQueue",
-				web::get().to(interaction::save_play_queue),
-			)
-			.route(
-				"/savePlayQueue.view",
-				web::get().to(interaction::save_play_queue),
-			),
+	let mut scope = web::scope("/rest").wrap(crate::api::subsonic::middleware::SubsonicAuth);
+
+	sub_route!(scope, "/ping", system::ping);
+	sub_route!(scope, "/getCoverArt", media::get_cover_art);
+	sub_route!(scope, "/getLicense", system::get_license);
+	sub_route!(
+		scope,
+		"/getOpenSubsonicExtensions",
+		system::get_open_subsonic_extensions
 	);
+	sub_route!(scope, "/search3", search::search3);
+	sub_route!(scope, "/search", search::search2);
+	sub_route!(scope, "/search2", search::search2);
+
+	// Browsing
+	sub_route!(scope, "/getMusicFolders", browsing::get_music_folders);
+	sub_route!(scope, "/getMusicDirectory", browsing::get_music_directory);
+	sub_route!(scope, "/getIndexes", browsing::get_indexes);
+	sub_route!(scope, "/getTopSongs", browsing::get_top_songs);
+	sub_route!(scope, "/getSimilarSongs", browsing::get_similar_songs);
+	sub_route!(scope, "/getArtists", browsing::get_artists);
+	sub_route!(scope, "/getArtistInfo", browsing::get_artist_info);
+	sub_route!(scope, "/getArtistInfo2", browsing::get_artist_info);
+	sub_route!(scope, "/getRandomSongs", browsing::get_random_songs);
+	sub_route!(scope, "/getSongsByGenre", browsing::get_songs_by_genre);
+	sub_route!(scope, "/getGenres", browsing::get_genres);
+	sub_route!(
+		scope,
+		"/getInternetRadioStations",
+		browsing::get_internet_radio_stations
+	);
+	sub_route!(scope, "/getAlbumList", browsing::get_album_list);
+	sub_route!(scope, "/getAlbumList2", browsing::get_album_list);
+	sub_route!(scope, "/getAlbum", browsing::get_album);
+	sub_route!(scope, "/getArtist", browsing::get_artist);
+	sub_route!(scope, "/getAlbumInfo", browsing::get_album_info);
+	sub_route!(scope, "/getAlbumInfo2", browsing::get_album_info);
+	sub_route!(scope, "/getSong", browsing::get_song);
+
+	// Playlists
+	sub_route!(scope, "/getPlaylists", playlists::get_playlists);
+	sub_route!(scope, "/getPlaylist", playlists::get_playlist);
+	sub_route!(scope, "/createPlaylist", playlists::create_playlist);
+	sub_route!(scope, "/deletePlaylist", playlists::delete_playlist);
+	sub_route!(scope, "/updatePlaylist", playlists::update_playlist);
+
+	// Media (excluding getCoverArt which is public)
+	sub_route!(scope, "/stream", media::stream);
+	sub_route!(scope, "/download", media::download);
+	sub_route!(scope, "/getLyrics", media::get_lyrics);
+	sub_route!(scope, "/getLyricsBySongId", media::get_lyrics);
+
+	// User
+	sub_route!(scope, "/getUser", user::get_user);
+	sub_route!(scope, "/getAvatar", user::get_avatar);
+
+	// Starred
+	sub_route!(scope, "/getStarred", starred::get_starred);
+	sub_route!(scope, "/getStarred2", starred::get_starred);
+	sub_route!(scope, "/star", starred::star);
+	sub_route!(scope, "/unstar", starred::unstar);
+
+	// Interaction
+	sub_route!(scope, "/setRating", interaction::set_rating);
+	sub_route!(scope, "/scrobble", interaction::scrobble);
+	sub_route!(scope, "/getQueue", interaction::get_queue);
+	sub_route!(scope, "/saveQueue", interaction::save_queue);
+	sub_route!(scope, "/getPlayQueue", interaction::get_play_queue);
+	sub_route!(scope, "/savePlayQueue", interaction::save_play_queue);
+
+	cfg.service(scope);
 }

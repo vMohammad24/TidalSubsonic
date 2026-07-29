@@ -165,24 +165,11 @@ pub async fn get_similar_songs(
 }
 
 pub async fn get_album_info(
+	req: actix_web::HttpRequest,
 	query: web::Query<IdQuery>,
 	subsonic_ctx: actix_web::web::ReqData<SubsonicContext>,
 ) -> impl Responder {
-	get_album_info_impl(query, subsonic_ctx, false).await
-}
-
-pub async fn get_album_info2(
-	query: web::Query<IdQuery>,
-	subsonic_ctx: actix_web::web::ReqData<SubsonicContext>,
-) -> impl Responder {
-	get_album_info_impl(query, subsonic_ctx, true).await
-}
-
-async fn get_album_info_impl(
-	query: web::Query<IdQuery>,
-	subsonic_ctx: actix_web::web::ReqData<SubsonicContext>,
-	is_v2: bool,
-) -> impl Responder {
+	let is_v2 = req.path().contains("getAlbumInfo2");
 	let mut resp = SubsonicResponseWrapper::ok();
 	let api = subsonic_ctx.tidal_api.clone();
 
@@ -229,30 +216,17 @@ async fn get_album_info_impl(
 	SubsonicResponder(SubsonicResponseWrapper::error(70, "Album not found"))
 }
 
-pub async fn get_artist_info(
-	query: web::Query<GetArtistInfoQuery>,
-	subsonic_ctx: actix_web::web::ReqData<SubsonicContext>,
-) -> impl Responder {
-	get_artist_info_impl(query, subsonic_ctx, false).await
-}
-
-pub async fn get_artist_info2(
-	query: web::Query<GetArtistInfoQuery>,
-	subsonic_ctx: actix_web::web::ReqData<SubsonicContext>,
-) -> impl Responder {
-	get_artist_info_impl(query, subsonic_ctx, true).await
-}
-
 #[derive(Deserialize)]
 pub struct GetArtistInfoQuery {
 	pub id: String,
 }
 
-async fn get_artist_info_impl(
+pub async fn get_artist_info(
+	req: actix_web::HttpRequest,
 	query: web::Query<GetArtistInfoQuery>,
 	subsonic_ctx: actix_web::web::ReqData<SubsonicContext>,
-	is_v2: bool,
 ) -> impl Responder {
+	let is_v2 = req.path().contains("getArtistInfo2");
 	let mut resp = SubsonicResponseWrapper::ok();
 	let api = subsonic_ctx.tidal_api.clone();
 
@@ -547,134 +521,123 @@ pub async fn get_album_list(
 	SubsonicResponder(resp)
 }
 
+use crate::api::error::AppError;
+use crate::api::subsonic::response::ApiResult;
+
 pub async fn get_album(
 	query: web::Query<IdQuery>,
 	_manager: web::Data<Arc<TidalClientManager>>,
 	subsonic_ctx: actix_web::web::ReqData<SubsonicContext>,
-) -> impl Responder {
-	let api = subsonic_ctx.tidal_api.clone();
-	let mut resp = SubsonicResponseWrapper::ok();
+) -> ApiResult {
+	ApiResult::from_result(
+		async move {
+			let api = subsonic_ctx.tidal_api.clone();
+			let mut resp = SubsonicResponseWrapper::ok();
 
-	if let Ok(album_id) = query.id.parse::<i64>() {
-		match api.get_album(album_id).await {
-			Ok(tidal_album) => {
-				let mut songs = Vec::new();
-				if let Ok(tracks) = api.get_album_tracks(album_id, 50, 0).await {
-					for track in tracks.items {
-						songs.push(crate::api::subsonic::mapping::map_tidal_track_to_subsonic(
-							&track,
-							Some(&subsonic_ctx),
-							Some(&tidal_album),
-							None,
-						));
-					}
+			let album_id = query
+				.id
+				.parse::<i64>()
+				.map_err(|_| AppError::BadRequest("Invalid album ID".into()))?;
+
+			let tidal_album = api.get_album(album_id).await?;
+			let mut songs = Vec::new();
+			if let Ok(tracks) = api.get_album_tracks(album_id, 50, 0).await {
+				for track in tracks.items {
+					songs.push(crate::api::subsonic::mapping::map_tidal_track_to_subsonic(
+						&track,
+						Some(&subsonic_ctx),
+						Some(&tidal_album),
+						None,
+					));
 				}
+			}
 
-				let mut subsonic_album = crate::api::subsonic::mapping::map_tidal_album_to_subsonic(
-					&tidal_album,
-					Some(&subsonic_ctx),
-					None,
-				);
-				subsonic_album.song = Some(songs);
-				resp.response.album = Some(subsonic_album);
-			}
-			Err(e) => {
-				tracing::error!("Tidal API Error: {:?}", e);
-				let msg = if cfg!(debug_assertions) {
-					format!("Tidal API Error: {:?}", e)
-				} else {
-					"Upstream dependency failed".to_string()
-				};
-				return SubsonicResponder(SubsonicResponseWrapper::error(0, &msg));
-			}
+			let mut subsonic_album = crate::api::subsonic::mapping::map_tidal_album_to_subsonic(
+				&tidal_album,
+				Some(&subsonic_ctx),
+				None,
+			);
+			subsonic_album.song = Some(songs);
+			resp.response.album = Some(subsonic_album);
+
+			Ok::<_, AppError>(resp)
 		}
-	}
-
-	SubsonicResponder(resp)
+		.await,
+	)
 }
 
 pub async fn get_artist(
 	query: web::Query<IdQuery>,
 	_manager: web::Data<Arc<TidalClientManager>>,
 	subsonic_ctx: actix_web::web::ReqData<SubsonicContext>,
-) -> impl Responder {
-	let api = subsonic_ctx.tidal_api.clone();
-	let mut resp = SubsonicResponseWrapper::ok();
+) -> ApiResult {
+	ApiResult::from_result(
+		async move {
+			let api = subsonic_ctx.tidal_api.clone();
+			let mut resp = SubsonicResponseWrapper::ok();
 
-	if let Ok(artist_id) = query.id.parse::<i64>() {
-		match api.get_artist(artist_id).await {
-			Ok(tidal_artist) => {
-				let mut albums = Vec::new();
-				if let Ok(artist_albums) = api.get_artist_albums(artist_id, 50, 0).await
-					&& let Ok(artist_singles) = api.get_artist_singles(artist_id, 50, 0).await
+			let artist_id = query
+				.id
+				.parse::<i64>()
+				.map_err(|_| AppError::BadRequest("Invalid artist ID".into()))?;
+
+			let tidal_artist = api.get_artist(artist_id).await?;
+			let mut albums = Vec::new();
+			if let Ok(artist_albums) = api.get_artist_albums(artist_id, 50, 0).await
+				&& let Ok(artist_singles) = api.get_artist_singles(artist_id, 50, 0).await
+			{
+				for tidal_album in
+					mapping::dedupe_albums([artist_albums.items, artist_singles.items].concat())
 				{
-					for tidal_album in
-						mapping::dedupe_albums([artist_albums.items, artist_singles.items].concat())
-					{
-						albums.push(mapping::map_tidal_album_to_subsonic(
-							&tidal_album,
-							Some(&subsonic_ctx),
-							Some(std::slice::from_ref(&tidal_artist)),
-						));
-					}
-				}
-
-				let mut subsonic_artist =
-					crate::api::subsonic::mapping::map_tidal_artist_to_subsonic(
-						&tidal_artist,
+					albums.push(mapping::map_tidal_album_to_subsonic(
+						&tidal_album,
 						Some(&subsonic_ctx),
-					);
-				subsonic_artist.album_count = albums.len() as i32;
-				subsonic_artist.album = Some(albums);
-				resp.response.artist = Some(subsonic_artist);
+						Some(std::slice::from_ref(&tidal_artist)),
+					));
+				}
 			}
-			Err(e) => {
-				tracing::error!("Tidal API Error: {:?}", e);
-				let msg = if cfg!(debug_assertions) {
-					format!("Tidal API Error: {:?}", e)
-				} else {
-					"Upstream dependency failed".to_string()
-				};
-				return SubsonicResponder(SubsonicResponseWrapper::error(0, &msg));
-			}
-		}
-	}
 
-	SubsonicResponder(resp)
+			let mut subsonic_artist = crate::api::subsonic::mapping::map_tidal_artist_to_subsonic(
+				&tidal_artist,
+				Some(&subsonic_ctx),
+			);
+			subsonic_artist.album_count = albums.len() as i32;
+			subsonic_artist.album = Some(albums);
+			resp.response.artist = Some(subsonic_artist);
+
+			Ok::<_, AppError>(resp)
+		}
+		.await,
+	)
 }
 
 pub async fn get_song(
 	query: web::Query<IdQuery>,
 	_manager: web::Data<Arc<TidalClientManager>>,
 	subsonic_ctx: actix_web::web::ReqData<SubsonicContext>,
-) -> impl Responder {
-	let api = subsonic_ctx.tidal_api.clone();
-	let mut resp = SubsonicResponseWrapper::ok();
+) -> ApiResult {
+	ApiResult::from_result(
+		async move {
+			let api = subsonic_ctx.tidal_api.clone();
+			let mut resp = SubsonicResponseWrapper::ok();
 
-	if let Ok(track_id) = query.id.parse::<i64>() {
-		match api.get_track(track_id).await {
-			Ok(track) => {
-				resp.response.song =
-					Some(crate::api::subsonic::mapping::map_tidal_track_to_subsonic(
-						&track,
-						Some(&subsonic_ctx),
-						None,
-						None,
-					));
-			}
-			Err(e) => {
-				tracing::error!("Tidal API Error: {:?}", e);
-				let msg = if cfg!(debug_assertions) {
-					format!("Tidal API Error: {:?}", e)
-				} else {
-					"Upstream dependency failed".to_string()
-				};
-				return SubsonicResponder(SubsonicResponseWrapper::error(0, &msg));
-			}
+			let track_id = query
+				.id
+				.parse::<i64>()
+				.map_err(|_| AppError::BadRequest("Invalid track ID".into()))?;
+
+			let track = api.get_track(track_id).await?;
+			resp.response.song = Some(crate::api::subsonic::mapping::map_tidal_track_to_subsonic(
+				&track,
+				Some(&subsonic_ctx),
+				None,
+				None,
+			));
+
+			Ok::<_, AppError>(resp)
 		}
-	}
-
-	SubsonicResponder(resp)
+		.await,
+	)
 }
 
 pub async fn get_music_directory(

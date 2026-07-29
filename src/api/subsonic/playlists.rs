@@ -65,12 +65,7 @@ pub async fn create_playlist(
 		}
 		Err(e) => {
 			tracing::error!("Failed to create playlist: {:?}", e);
-			let msg = if cfg!(debug_assertions) {
-				format!("Failed to create playlist: {:?}", e)
-			} else {
-				"Upstream dependency failed".to_string()
-			};
-			resp = SubsonicResponseWrapper::error(0, &msg);
+			resp = SubsonicResponseWrapper::from_upstream_error(&e);
 		}
 	}
 

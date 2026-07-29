@@ -138,12 +138,8 @@ async fn handle_search(
 			}
 			Err(e) => {
 				tracing::error!("Tidal API Error: {:?}", e);
-				let msg = if cfg!(debug_assertions) {
-					format!("Tidal API Error: {:?}", e)
-				} else {
-					"Upstream dependency failed".to_string()
-				};
-				return SubsonicResponder(SubsonicResponseWrapper::error(0, &msg)).customize();
+				return SubsonicResponder(SubsonicResponseWrapper::from_upstream_error(&e))
+					.customize();
 			}
 		}
 	} else {
