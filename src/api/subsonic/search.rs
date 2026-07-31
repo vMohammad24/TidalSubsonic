@@ -145,7 +145,7 @@ async fn handle_search(
 	} else {
 		let s = if song_limit > 0 {
 			let mut cached_tracks: Vec<_> = TRACK_CACHE.iter().collect();
-			cached_tracks.sort_by_key(|(k, _)| **k);
+			cached_tracks.sort_unstable_by(|a, b| a.0.cmp(&b.0));
 
 			cached_tracks
 				.into_iter()
@@ -166,7 +166,7 @@ async fn handle_search(
 
 		let b = if album_limit > 0 {
 			let mut cached_albums: Vec<_> = ALBUM_CACHE.iter().collect();
-			cached_albums.sort_by_key(|(k, _)| **k);
+			cached_albums.sort_unstable_by(|a, b| a.0.cmp(&b.0));
 
 			cached_albums
 				.into_iter()
@@ -186,7 +186,7 @@ async fn handle_search(
 
 		let r = if artist_limit > 0 {
 			let mut cached_artists: Vec<_> = ARTIST_CACHE.iter().collect();
-			cached_artists.sort_by_key(|(k, _)| **k);
+			cached_artists.sort_unstable_by(|a, b| a.0.cmp(&b.0));
 
 			cached_artists
 				.into_iter()

@@ -46,7 +46,7 @@ pub async fn get_starred(
 						}
 					})
 					.buffered(50)
-					.filter_map(|s| async { s })
+					.filter_map(std::future::ready)
 					.collect::<Vec<_>>()
 					.await
 			} else {
@@ -79,7 +79,7 @@ pub async fn get_starred(
 						}
 					})
 					.buffered(50)
-					.filter_map(|s| async { s })
+					.filter_map(std::future::ready)
 					.collect::<Vec<_>>()
 					.await
 			} else {
@@ -111,7 +111,7 @@ pub async fn get_starred(
 						}
 					})
 					.buffered(50)
-					.filter_map(|s| async { s })
+					.filter_map(std::future::ready)
 					.collect::<Vec<_>>()
 					.await
 			} else {
@@ -141,7 +141,9 @@ pub async fn get_starred(
 		let mut artists = Vec::new();
 
 		if let Ok(mut fav_tracks) = api.get_favorite_tracks(user_id, 5000, 0).await {
-			fav_tracks.items.sort_by(|a, b| b.created.cmp(&a.created));
+			fav_tracks
+				.items
+				.sort_unstable_by(|a, b| b.created.cmp(&a.created));
 			for track in fav_tracks.items {
 				songs.push(crate::api::subsonic::mapping::map_tidal_track_to_subsonic(
 					&track.item,

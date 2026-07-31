@@ -76,16 +76,14 @@ pub fn map_tidal_artist_to_subsonic(
 		.or(artist.selected_album_cover_fallback.as_deref())
 		.unwrap_or("");
 
-	let artist_image_url = if !cover_art.is_empty() {
-		Some(format!(
+	let artist_image_url = (!cover_art.is_empty()).then(|| {
+		format!(
 			"https://resources.tidal.com/images/{}/750x750.jpg",
-			cover_art.replace("-", "/")
-		))
-	} else {
-		None
-	};
+			cover_art.replace('-', "/")
+		)
+	});
 
-	let starred = if let Some(ctx) = subsonic_ctx {
+	let starred = subsonic_ctx.and_then(|ctx| {
 		if ctx.use_favorites {
 			get_local_favorite_date(&ctx.user, artist.id)
 		} else {
@@ -93,9 +91,7 @@ pub fn map_tidal_artist_to_subsonic(
 				.user_id()
 				.and_then(|uid| get_favorite_date(uid, artist.id))
 		}
-	} else {
-		None
-	};
+	});
 
 	Artist {
 		id: artist.id.to_string(),
@@ -131,19 +127,14 @@ pub fn map_tidal_album_to_subsonic(
 
 	let primary_artist_id = artists
 		.and_then(|a| a.first())
-		.map(|a| a.id.to_string())
-		.or_else(|| album.artist.as_ref().map(|a| a.id.to_string()))
-		.or_else(|| {
-			album
-				.artists
-				.as_ref()
-				.and_then(|a| a.first())
-				.map(|a| a.id.to_string())
-		});
+		.map(|a| a.id)
+		.or_else(|| album.artist.as_ref().map(|a| a.id))
+		.or_else(|| album.artists.as_ref().and_then(|a| a.first()).map(|a| a.id))
+		.map(|id| id.to_string());
 
 	let cover_art_id = album.cover.clone().unwrap_or_else(|| album.id.to_string());
 
-	let starred = if let Some(ctx) = subsonic_ctx {
+	let starred = subsonic_ctx.and_then(|ctx| {
 		if ctx.use_favorites {
 			get_local_favorite_date(&ctx.user, album.id)
 		} else {
@@ -151,9 +142,7 @@ pub fn map_tidal_album_to_subsonic(
 				.user_id()
 				.and_then(|uid| get_favorite_date(uid, album.id))
 		}
-	} else {
-		None
-	};
+	});
 
 	let album_title = album.title.clone();
 
@@ -251,7 +240,7 @@ pub fn map_tidal_track_to_subsonic(
 		.map(|tags| tags.iter().any(|t| t == "DOLBY_ATMOS"))
 		.unwrap_or(false);
 
-	let starred = if let Some(ctx) = subsonic_ctx {
+	let starred = subsonic_ctx.and_then(|ctx| {
 		if ctx.use_favorites {
 			get_local_favorite_date(&ctx.user, track.id)
 		} else {
@@ -259,9 +248,7 @@ pub fn map_tidal_track_to_subsonic(
 				.user_id()
 				.and_then(|uid| get_favorite_date(uid, track.id))
 		}
-	} else {
-		None
-	};
+	});
 
 	Song {
 		id: track.id.to_string(),
@@ -345,8 +332,8 @@ pub fn map_local_playlist_to_subsonic(playlist: &LocalPlaylistWithCount) -> Play
 	}
 }
 
-pub fn dedupe_albums(albums: Vec<TidalAlbum>) -> Vec<TidalAlbum> {
-	let mut map: HashMap<String, TidalAlbum> = HashMap::new();
+pub fn dedupe_albums(albums: impl IntoIterator<Item = TidalAlbum>) -> Vec<TidalAlbum> {
+	let mut map: HashMap<(String, i64), TidalAlbum> = HashMap::new();
 
 	for mut album in albums {
 		let is_atmos = album
@@ -360,12 +347,8 @@ pub fn dedupe_albums(albums: Vec<TidalAlbum>) -> Vec<TidalAlbum> {
 			album.title = format!("[DA] {}", album.title);
 		}
 
-		let artist_key = album
-			.artist
-			.as_ref()
-			.map(|a| a.id.to_string())
-			.unwrap_or_else(|| "unknown".to_string());
-		let key = format!("{}-{}", album.title.to_lowercase().trim(), artist_key);
+		let artist_id = album.artist.as_ref().map(|a| a.id).unwrap_or(0);
+		let key = (album.title.trim().to_lowercase(), artist_id);
 
 		let get_rank = |a: &TidalAlbum| match a.audio_quality.as_deref() {
 			Some("HI_RES_LOSSLESS") => 4,

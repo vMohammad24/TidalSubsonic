@@ -46,24 +46,17 @@ async fn get_users(
 	req: HttpRequest,
 	manager: web::Data<Arc<TidalClientManager>>,
 ) -> impl Responder {
-	let tidal_user_id = match extract_user_id(&req, &manager).await {
-		Some(id) => id,
-		None => {
-			return HttpResponse::Unauthorized()
-				.json(serde_json::json!({ "error": "User ID not found" }));
-		}
+	let Some(tidal_user_id) = extract_user_id(&req, &manager).await else {
+		return HttpResponse::Unauthorized()
+			.json(serde_json::json!({ "error": "User ID not found" }));
 	};
 
-	let usernames = match manager
+	let Ok(usernames) = manager
 		.db
 		.list_users_for_tidal_account(&tidal_user_id)
 		.await
-	{
-		Ok(u) => u,
-		Err(_) => {
-			return HttpResponse::InternalServerError()
-				.json(serde_json::json!({"error": "DB Error"}));
-		}
+	else {
+		return HttpResponse::InternalServerError().json(serde_json::json!({"error": "DB Error"}));
 	};
 
 	let mut users_with_details = Vec::new();
@@ -119,28 +112,19 @@ async fn create_user(
 			"error": "Rate limit exceeded"
 		}));
 	}
-	let tidal_user_id = match extract_user_id(&req, &manager).await {
-		Some(id) => id,
-		None => {
-			return HttpResponse::Unauthorized()
-				.json(serde_json::json!({ "error": "User ID not found" }));
-		}
+	let Some(tidal_user_id) = extract_user_id(&req, &manager).await else {
+		return HttpResponse::Unauthorized()
+			.json(serde_json::json!({ "error": "User ID not found" }));
 	};
 
-	let username = match &req_body.username {
-		Some(u) => u,
-		None => {
-			return HttpResponse::BadRequest()
-				.json(serde_json::json!({ "error": "Username and password are required" }));
-		}
+	let Some(username) = &req_body.username else {
+		return HttpResponse::BadRequest()
+			.json(serde_json::json!({ "error": "Username and password are required" }));
 	};
 
-	let password = match &req_body.password {
-		Some(p) => p,
-		None => {
-			return HttpResponse::BadRequest()
-				.json(serde_json::json!({ "error": "Username and password are required" }));
-		}
+	let Some(password) = &req_body.password else {
+		return HttpResponse::BadRequest()
+			.json(serde_json::json!({ "error": "Username and password are required" }));
 	};
 
 	let encrypted_password = match crypto::encrypt_string(password) {
@@ -184,23 +168,17 @@ async fn update_features(
 	req: HttpRequest,
 	manager: web::Data<Arc<TidalClientManager>>,
 ) -> impl Responder {
-	let tidal_user_id = match extract_user_id(&req, &manager).await {
-		Some(id) => id,
-		None => {
-			return HttpResponse::Unauthorized()
-				.json(serde_json::json!({ "error": "User ID not found" }));
-		}
+	let Some(tidal_user_id) = extract_user_id(&req, &manager).await else {
+		return HttpResponse::Unauthorized()
+			.json(serde_json::json!({ "error": "User ID not found" }));
 	};
 
-	let (username, feature, enabled) =
-		match (&req_body.username, &req_body.feature, req_body.enabled) {
-			(Some(u), Some(f), Some(e)) => (u, f, e),
-			_ => {
-				return HttpResponse::BadRequest().json(
-					serde_json::json!({ "error": "Missing username, feature, or enabled flag" }),
-				);
-			}
-		};
+	let (Some(username), Some(feature), Some(enabled)) =
+		(&req_body.username, &req_body.feature, req_body.enabled)
+	else {
+		return HttpResponse::BadRequest()
+			.json(serde_json::json!({ "error": "Missing username, feature, or enabled flag" }));
+	};
 
 	let (user_tidal_id, _, mut use_playlists, mut use_favorites) =
 		match manager.db.get_user_details(username).await {
@@ -240,20 +218,14 @@ async fn delete_user(
 	req: HttpRequest,
 	manager: web::Data<Arc<TidalClientManager>>,
 ) -> impl Responder {
-	let tidal_user_id = match extract_user_id(&req, &manager).await {
-		Some(id) => id,
-		None => {
-			return HttpResponse::Unauthorized()
-				.json(serde_json::json!({ "error": "User ID not found" }));
-		}
+	let Some(tidal_user_id) = extract_user_id(&req, &manager).await else {
+		return HttpResponse::Unauthorized()
+			.json(serde_json::json!({ "error": "User ID not found" }));
 	};
 
-	let username = match &req_body.username {
-		Some(u) => u,
-		None => {
-			return HttpResponse::BadRequest()
-				.json(serde_json::json!({ "error": "Username is required" }));
-		}
+	let Some(username) = &req_body.username else {
+		return HttpResponse::BadRequest()
+			.json(serde_json::json!({ "error": "Username is required" }));
 	};
 
 	let (user_tidal_id, _, _, _) = match manager.db.get_user_details(username).await {

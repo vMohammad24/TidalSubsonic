@@ -20,21 +20,15 @@ pub static LOCAL_FAVORITE_CACHE: LazyLock<Cache<String, ItemFavorites>> = LazyLo
 });
 
 pub fn get_favorite_date(user_id: i64, item_id: i64) -> Option<String> {
-	if let Some(user_favorites) = FAVORITE_CACHE.get(&user_id)
-		&& let Ok(guard) = user_favorites.read()
-	{
-		return guard.get(&item_id).cloned();
-	}
-	None
+	FAVORITE_CACHE
+		.get(&user_id)
+		.and_then(|favs| favs.read().ok()?.get(&item_id).cloned())
 }
 
 pub fn get_local_favorite_date(username: &str, item_id: i64) -> Option<String> {
-	if let Some(user_favorites) = LOCAL_FAVORITE_CACHE.get(username)
-		&& let Ok(guard) = user_favorites.read()
-	{
-		return guard.get(&item_id).cloned();
-	}
-	None
+	LOCAL_FAVORITE_CACHE
+		.get(username)
+		.and_then(|favs| favs.read().ok()?.get(&item_id).cloned())
 }
 
 pub fn add_favorite(user_id: i64, item_id: i64, created: String) {

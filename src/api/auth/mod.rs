@@ -86,7 +86,7 @@ async fn initiate_login(
 			store.write().unwrap_or_else(|e| e.into_inner()).insert(
 				auth_attempt_id.clone(),
 				DeviceAuthSession {
-					device_code: device_auth.device_code.clone(),
+					device_code: device_auth.device_code,
 					user_code: device_auth.user_code.clone(),
 					verification_uri: device_auth.verification_uri.clone(),
 					verification_uri_complete: device_auth.verification_uri_complete.clone(),
@@ -146,27 +146,22 @@ async fn check_auth_status(
 	store: web::Data<DeviceAuthStore>,
 ) -> impl Responder {
 	let q = query.into_inner();
-	let session_id = match q.session_id {
-		Some(id) => id,
-		None => {
-			return HttpResponse::Ok().json(serde_json::json!({
-				"status": "failed",
-				"error": "Invalid or expired session"
-			}));
-		}
+	let Some(session_id) = q.session_id else {
+		return HttpResponse::Ok().json(serde_json::json!({
+			"status": "failed",
+			"error": "Invalid or expired session"
+		}));
 	};
 
 	let mut auth_attempt = {
 		let store_read = store.read().unwrap_or_else(|e| e.into_inner());
-		match store_read.get(&session_id) {
-			Some(s) => s.clone(),
-			None => {
-				return HttpResponse::Ok().json(serde_json::json!({
-					"status": "failed",
-					"error": "Invalid or expired session"
-				}));
-			}
-		}
+		let Some(s) = store_read.get(&session_id) else {
+			return HttpResponse::Ok().json(serde_json::json!({
+				"status": "failed",
+				"error": "Invalid or expired session"
+			}));
+		};
+		s.clone()
 	};
 
 	let now = Utc::now().timestamp() as u64;
@@ -467,15 +462,13 @@ async fn request_data(
 		return HttpResponse::InternalServerError().finish();
 	}
 
-	let host = req.connection_info().host().to_string();
-
 	let readme_content = format!(
 		"This ZIP file contains your personal data stored by the Tidal Subsonic Server hosted on {}.\n\n\
                 - profile.json: Your account settings, linked Tidal ID, and feature flags.\n\
                 - play_queues.json: Your active listening state and queued tracks.\n\n\
                 NOTE:\n\
                 - Your Tidal credentials (access and refresh tokens) and Subsonic passwords are encrypted in our database and are not included in this export for security reasons.\n",
-		host
+		req.connection_info().host()
 	);
 	let readme_entry = ZipEntryBuilder::new("README.txt".into(), Compression::Deflate);
 	if let Err(e) = writer
@@ -505,7 +498,8 @@ async fn request_data(
 			"Content-Disposition",
 			format!(
 				"attachment; filename=\"tss_data_{}_on_{}.zip\"",
-				username, host
+				username,
+				req.connection_info().host()
 			),
 		))
 		.body(buffer)

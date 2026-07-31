@@ -35,7 +35,8 @@ pub fn encrypt_string(plain_password: &str) -> Result<String, CryptoError> {
 		.encrypt(&nonce, plain_password.as_bytes())
 		.map_err(|e| CryptoError::EncryptionFailed(e.to_string()))?;
 
-	let mut combined = nonce.to_vec();
+	let mut combined = Vec::with_capacity(12 + ciphertext.len());
+	combined.extend_from_slice(&nonce);
 	combined.extend_from_slice(&ciphertext);
 
 	Ok(base64::engine::general_purpose::STANDARD.encode(combined))

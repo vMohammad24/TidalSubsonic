@@ -93,7 +93,7 @@ pub async fn scrobble(
 			let duration_str = track.duration.to_string();
 			params.push(("duration", &duration_str));
 
-			params.sort_by_key(|k| k.0);
+			params.sort_unstable_by(|a, b| a.0.cmp(b.0));
 			let mut sig_str = String::new();
 			for (k, v) in &params {
 				sig_str.push_str(k);
@@ -106,10 +106,10 @@ pub async fn scrobble(
 			let _ = reqwest_client.post(url).form(&params).send().await;
 		}
 	} else {
-		let mut params = vec![
-			("method".to_string(), "track.scrobble".to_string()),
-			("api_key".to_string(), api_key),
-			("sk".to_string(), session_key),
+		let mut params: Vec<(std::borrow::Cow<'static, str>, String)> = vec![
+			("method".into(), "track.scrobble".to_string()),
+			("api_key".into(), api_key),
+			("sk".into(), session_key),
 		];
 
 		let mut count = 0;
@@ -131,18 +131,24 @@ pub async fn scrobble(
 					.record_scrobble(&subsonic_ctx.user, id_str, played_at, true)
 					.await;
 
-				params.push((format!("track[{}]", count), track.title));
-				params.push((format!("artist[{}]", count), track.artist.name));
-				params.push((format!("timestamp[{}]", count), timestamp.to_string()));
-				params.push((format!("album[{}]", count), track.album.title));
-				params.push((format!("duration[{}]", count), track.duration.to_string()));
+				params.push((format!("track[{}]", count).into(), track.title));
+				params.push((format!("artist[{}]", count).into(), track.artist.name));
+				params.push((
+					format!("timestamp[{}]", count).into(),
+					timestamp.to_string(),
+				));
+				params.push((format!("album[{}]", count).into(), track.album.title));
+				params.push((
+					format!("duration[{}]", count).into(),
+					track.duration.to_string(),
+				));
 
 				count += 1;
 			}
 		}
 
 		if count > 0 {
-			params.sort_by(|a, b| a.0.cmp(&b.0));
+			params.sort_unstable_by(|a, b| a.0.cmp(&b.0));
 			let mut sig_str = String::new();
 			for (k, v) in &params {
 				sig_str.push_str(k);
@@ -151,7 +157,7 @@ pub async fn scrobble(
 			sig_str.push_str(&api_secret);
 			let api_sig = format!("{:x}", md5::compute(sig_str));
 
-			params.push(("api_sig".to_string(), api_sig));
+			params.push(("api_sig".into(), api_sig));
 			let _ = reqwest_client.post(url).form(&params).send().await;
 		}
 	}
@@ -231,38 +237,38 @@ async fn get_play_queue_impl(
 	db: web::Data<Arc<DbManager>>,
 ) -> impl Responder {
 	let mut resp = SubsonicResponseWrapper::ok();
-	let username = subsonic_ctx.user.clone();
+	let ctx = subsonic_ctx.into_inner();
 
-	match db.get_play_queue(&subsonic_ctx.user).await {
+	match db.get_play_queue(&ctx.user).await {
 		Ok(Some(db_queue)) => {
 			let changed = "2026-01-01T00:00:00.000Z".to_string();
-			let mut play_queue = PlayQueue {
-				current: db_queue.current_track_id,
-				position: db_queue.position_ms,
-				username,
-				changed,
-				changed_schema: db_queue.updated_at.timestamp_millis(),
-				entry: None,
-			};
+			let mut songs = Vec::new();
 
 			if !db_queue.track_ids.is_empty() {
-				let api = &subsonic_ctx.tidal_api;
-				let mut songs = Vec::new();
-
+				let api = &ctx.tidal_api;
 				for id_str in db_queue.track_ids.iter() {
 					if let Ok(tid) = id_str.parse::<i64>()
 						&& let Ok(track) = api.get_track(tid).await
 					{
 						songs.push(crate::api::subsonic::mapping::map_tidal_track_to_subsonic(
 							&track,
-							Some(&subsonic_ctx),
+							Some(&ctx),
 							None,
 							None,
 						));
 					}
 				}
-				play_queue.entry = Some(songs);
 			}
+
+			let entry = if songs.is_empty() { None } else { Some(songs) };
+			let play_queue = PlayQueue {
+				current: db_queue.current_track_id,
+				position: db_queue.position_ms,
+				username: ctx.user,
+				changed,
+				changed_schema: db_queue.updated_at.timestamp_millis(),
+				entry,
+			};
 
 			resp.response.play_queue = Some(play_queue);
 			SubsonicResponder(resp)
@@ -272,7 +278,7 @@ async fn get_play_queue_impl(
 			resp.response.play_queue = Some(PlayQueue {
 				current: None,
 				position: None,
-				username,
+				username: ctx.user,
 				changed,
 				changed_schema: 0,
 				entry: Some(Vec::new()),

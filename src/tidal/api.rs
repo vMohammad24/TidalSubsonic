@@ -448,12 +448,9 @@ impl TidalApi {
 	}
 
 	fn parse_iso_duration(s: &str) -> (i64, i64) {
-		let s = match s.strip_prefix("PT") {
-			Some(rest) => rest,
-			None => {
-				tracing::warn!(raw = %s, "ISO duration missing PT prefix, expected track duration");
-				return (0, 0);
-			}
+		let Some(s) = s.strip_prefix("PT") else {
+			tracing::warn!(raw = %s, "ISO duration missing PT prefix, expected track duration");
+			return (0, 0);
 		};
 		let mut minutes = 0i64;
 		let mut seconds = 0i64;

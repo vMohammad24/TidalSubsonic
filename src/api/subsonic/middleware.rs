@@ -92,17 +92,18 @@ where
 					s,
 					f,
 				} = query;
-				let mut format = f.unwrap_or_else(|| "xml".to_string()).to_lowercase();
-				if format != "json" && format != "jsonp" {
-					format = "xml".to_string();
-				}
+				let format = match f.as_deref() {
+					Some(fmt) if fmt.eq_ignore_ascii_case("json") => "json".to_string(),
+					Some(fmt) if fmt.eq_ignore_ascii_case("jsonp") => "jsonp".to_string(),
+					_ => "xml".to_string(),
+				};
 
 				let db = req
 					.app_data::<web::Data<Arc<DbManager>>>()
-					.map(|d| d.as_ref().clone());
+					.map(|d| Arc::clone(d.get_ref()));
 				let manager = req
 					.app_data::<web::Data<Arc<TidalClientManager>>>()
-					.map(|d| d.as_ref().clone());
+					.map(|d| Arc::clone(d.get_ref()));
 
 				if path.ends_with("/getCoverArt.view")
 					|| path.ends_with("/getCoverArt")

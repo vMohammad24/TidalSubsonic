@@ -293,10 +293,12 @@ async fn link(
 
 	let now_ms = chrono::Utc::now().timestamp_millis() as u64;
 
-	let state = format!("{}", now_ms);
-	let scheme = req.connection_info().scheme().to_string();
-	let host = req.connection_info().host().to_string();
-	let origin = format!("{}://{}", scheme, host);
+	let state = now_ms.to_string();
+	let origin = format!(
+		"{}://{}",
+		req.connection_info().scheme(),
+		req.connection_info().host()
+	);
 
 	let callback_url = format!(
 		"{}/lastfm/callback?state={}",
@@ -492,10 +494,12 @@ async fn link_form(
 	};
 
 	let now_ms = chrono::Utc::now().timestamp_millis() as u64;
-	let state = format!("{}", now_ms);
-	let scheme = req.connection_info().scheme().to_string();
-	let host = req.connection_info().host().to_string();
-	let origin = format!("{}://{}", scheme, host);
+	let state = now_ms.to_string();
+	let origin = format!(
+		"{}://{}",
+		req.connection_info().scheme(),
+		req.connection_info().host()
+	);
 
 	let callback_url = format!(
 		"{}/lastfm/callback?state={}",

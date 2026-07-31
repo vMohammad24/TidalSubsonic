@@ -82,23 +82,22 @@ impl TidalClientManager {
 			return Ok(client);
 		}
 
-		let tidal_id_opt = self
+		let Some(tidal_id) = self
 			.db
 			.get_tidal_user_for_subsonic(subsonic_username)
 			.await
-			.map_err(|e| TidalError::Unexpected(e.to_string()))?;
-
-		if let Some(tidal_id) = tidal_id_opt {
-			let client = self.get_client_for_tidal_user(&tidal_id).await?;
-			self.subsonic_user_cache
-				.insert(subsonic_username.to_string(), Arc::clone(&client))
-				.await;
-			Ok(client)
-		} else {
-			Err(TidalError::Authentication(
+			.map_err(|e| TidalError::Unexpected(e.to_string()))?
+		else {
+			return Err(TidalError::Authentication(
 				"No Tidal account linked to this Subsonic user. Please link your account via the web UI.".to_string(),
-			))
-		}
+			));
+		};
+
+		let client = self.get_client_for_tidal_user(&tidal_id).await?;
+		self.subsonic_user_cache
+			.insert(subsonic_username.to_string(), Arc::clone(&client))
+			.await;
+		Ok(client)
 	}
 
 	pub async fn get_client_for_tidal_user(

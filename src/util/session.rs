@@ -23,19 +23,19 @@ pub fn set_flash(session: &Session, kind: &str, msg: &str) {
 }
 
 pub fn get_flash(session: &Session) -> Option<StatusMessage> {
-	let kind: Option<String> = session.get("flash_kind").unwrap_or(None);
-	let msg: Option<String> = session.get("flash_msg").unwrap_or(None);
+	let kind: Option<String> = session.get("flash_kind").ok().flatten();
+	let msg: Option<String> = session.get("flash_msg").ok().flatten();
 
-	if let (Some(k), Some(m)) = (kind, msg) {
-		let _ = session.remove("flash_kind");
-		let _ = session.remove("flash_msg");
-		if k == "success" {
-			Some(StatusMessage::Success(m))
-		} else {
-			Some(StatusMessage::Error(m))
-		}
+	let (Some(k), Some(m)) = (kind, msg) else {
+		return None;
+	};
+
+	let _ = session.remove("flash_kind");
+	let _ = session.remove("flash_msg");
+	if k == "success" {
+		Some(StatusMessage::Success(m))
 	} else {
-		None
+		Some(StatusMessage::Error(m))
 	}
 }
 

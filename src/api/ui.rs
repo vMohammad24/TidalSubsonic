@@ -179,9 +179,8 @@ async fn create_user_form(
 	session: Session,
 	manager: web::Data<Arc<TidalClientManager>>,
 ) -> impl Responder {
-	let tidal_user_id = match extract_user_id(&req, &manager).await {
-		Some(id) => id,
-		None => return HttpResponse::Unauthorized().finish(),
+	let Some(tidal_user_id) = extract_user_id(&req, &manager).await else {
+		return HttpResponse::Unauthorized().finish();
 	};
 
 	let status = if form.username.trim().is_empty() || form.password.is_empty() {
@@ -224,9 +223,8 @@ async fn delete_user_form(
 	session: Session,
 	manager: web::Data<Arc<TidalClientManager>>,
 ) -> impl Responder {
-	let tidal_user_id = match extract_user_id(&req, &manager).await {
-		Some(id) => id,
-		None => return HttpResponse::Unauthorized().finish(),
+	let Some(tidal_user_id) = extract_user_id(&req, &manager).await else {
+		return HttpResponse::Unauthorized().finish();
 	};
 
 	let user_data = manager.db.get_user_details(&form.username).await;
@@ -250,9 +248,8 @@ async fn update_features_form(
 	session: Session,
 	manager: web::Data<Arc<TidalClientManager>>,
 ) -> impl Responder {
-	let tidal_user_id = match extract_user_id(&req, &manager).await {
-		Some(id) => id,
-		None => return HttpResponse::Unauthorized().finish(),
+	let Some(tidal_user_id) = extract_user_id(&req, &manager).await else {
+		return HttpResponse::Unauthorized().finish();
 	};
 
 	let user_data = manager.db.get_user_details(&form.username).await;

@@ -51,17 +51,18 @@ async fn get_favorite_artists(
 			&artist_entry.1,
 			Some(&subsonic_ctx),
 		);
-		let name_upper = artist.name.to_uppercase();
-		let mut initial = name_upper.chars().next().unwrap_or('#').to_string();
-		if !initial.chars().next().unwrap().is_ascii_alphabetic() {
-			initial = "#".to_string();
-		}
+		let first_char = artist.name.chars().next().unwrap_or('#');
+		let initial = if first_char.is_ascii_alphabetic() {
+			first_char.to_ascii_uppercase().to_string()
+		} else {
+			"#".to_string()
+		};
 		index_map.entry(initial).or_default().push(artist);
 	}
 
 	let mut indexes = Vec::new();
 	for (name, mut artists) in index_map {
-		artists.sort_by(|a, b| a.name.cmp(&b.name));
+		artists.sort_unstable_by(|a, b| a.name.cmp(&b.name));
 		indexes.push(Index {
 			name,
 			artist: artists,
@@ -344,14 +345,11 @@ pub async fn get_songs_by_genre(
 	query: web::Query<SongsByGenreQuery>,
 	subsonic_ctx: web::ReqData<SubsonicContext>,
 ) -> impl Responder {
-	let genre = match &query.genre {
-		Some(g) => g,
-		None => {
-			return SubsonicResponder(SubsonicResponseWrapper::error(
-				10,
-				"Missing parameter 'genre'",
-			));
-		}
+	let Some(genre) = &query.genre else {
+		return SubsonicResponder(SubsonicResponseWrapper::error(
+			10,
+			"Missing parameter 'genre'",
+		));
 	};
 	let count = query.count.unwrap_or(20).clamp(1, 500);
 	let offset = query.offset.unwrap_or(0);
@@ -383,16 +381,16 @@ pub async fn get_genres(subsonic_ctx: actix_web::web::ReqData<SubsonicContext>) 
 	let api = &subsonic_ctx.tidal_api;
 
 	if let Ok(categories) = api.get_categories().await {
-		let mut genres = Vec::new();
-		for cat in categories {
-			genres.push(crate::api::subsonic::models::Genre {
+		let mut genres: Vec<_> = categories
+			.into_iter()
+			.map(|cat| crate::api::subsonic::models::Genre {
 				value: cat.name,
 				song_count: 1,
 				album_count: 1,
-			});
-		}
+			})
+			.collect();
 
-		genres.sort_by(|a, b| a.value.cmp(&b.value));
+		genres.sort_unstable_by(|a, b| a.value.cmp(&b.value));
 		resp.response.genres = Some(crate::api::subsonic::models::Genres {
 			genre: Some(genres),
 		});
@@ -488,7 +486,7 @@ pub async fn get_album_list(
 				.collect();
 		} else {
 			let mut albums: Vec<_> = ALBUM_CACHE.iter().collect();
-			albums.sort_by_key(|a| *a.0);
+			albums.sort_unstable_by(|a, b| a.0.cmp(&b.0));
 
 			subsonic_albums = albums
 				.into_iter()
@@ -584,9 +582,9 @@ pub async fn get_artist(
 			if let Ok(artist_albums) = api.get_artist_albums(artist_id, 50, 0).await
 				&& let Ok(artist_singles) = api.get_artist_singles(artist_id, 50, 0).await
 			{
-				for tidal_album in
-					mapping::dedupe_albums([artist_albums.items, artist_singles.items].concat())
-				{
+				for tidal_album in mapping::dedupe_albums(
+					artist_albums.items.into_iter().chain(artist_singles.items),
+				) {
 					albums.push(mapping::map_tidal_album_to_subsonic(
 						&tidal_album,
 						Some(&subsonic_ctx),
@@ -649,7 +647,7 @@ pub async fn get_music_directory(
 		let mut children = Vec::new();
 
 		let mut artists: Vec<_> = ARTIST_CACHE.iter().collect();
-		artists.sort_by(|a, b| a.1.name.cmp(&b.1.name));
+		artists.sort_unstable_by(|a, b| a.1.name.cmp(&b.1.name));
 
 		for artist_entry in artists {
 			let artist = crate::api::subsonic::mapping::map_tidal_artist_to_subsonic(
@@ -696,7 +694,7 @@ pub async fn get_music_directory(
 	}
 
 	if let Ok(num_id) = query.id.parse::<i64>() {
-		let folder_id = query.id.clone();
+		let folder_id = query.into_inner().id;
 		if let Ok(tidal_album) = api.get_album(num_id).await {
 			let mut children = Vec::new();
 			if let Ok(tracks) = api.get_album_tracks(num_id, 500, 0).await {
@@ -750,9 +748,9 @@ pub async fn get_music_directory(
 			if let Ok(artist_albums) = api.get_artist_albums(num_id, 500, 0).await
 				&& let Ok(artist_singles) = api.get_artist_singles(num_id, 500, 0).await
 			{
-				for tidal_album in
-					mapping::dedupe_albums([artist_albums.items, artist_singles.items].concat())
-				{
+				for tidal_album in mapping::dedupe_albums(
+					artist_albums.items.into_iter().chain(artist_singles.items),
+				) {
 					let album = crate::api::subsonic::mapping::map_tidal_album_to_subsonic(
 						&tidal_album,
 						Some(&subsonic_ctx),

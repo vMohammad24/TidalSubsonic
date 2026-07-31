@@ -46,14 +46,12 @@ fn strip_at_prefix(val: &mut serde_json::Value) {
 			let needs_stripping = map.keys().any(|k| k.starts_with('@'));
 			if needs_stripping {
 				let old_map = std::mem::take(map);
-				for (k, mut v) in old_map {
+				for (mut k, mut v) in old_map {
 					strip_at_prefix(&mut v);
-					let new_key = if let Some(stripped) = k.strip_prefix('@') {
-						stripped.to_string()
-					} else {
-						k
-					};
-					map.insert(new_key, v);
+					if k.starts_with('@') {
+						k.remove(0);
+					}
+					map.insert(k, v);
 				}
 			} else {
 				for v in map.values_mut() {
@@ -79,9 +77,13 @@ impl Responder for SubsonicResponder {
 		let format: &str = if let Some(ctx) = extensions.get::<SubsonicContext>() {
 			ctx.format.as_str()
 		} else {
-			format_owned = serde_qs::from_str::<HashMap<String, String>>(req.query_string())
+			#[derive(serde::Deserialize)]
+			struct FormatQuery<'a> {
+				f: Option<&'a str>,
+			}
+			format_owned = serde_qs::from_str::<FormatQuery>(req.query_string())
 				.ok()
-				.and_then(|q| q.get("f").cloned())
+				.and_then(|q| q.f.map(String::from))
 				.unwrap_or_else(|| "xml".to_string());
 			&format_owned
 		};

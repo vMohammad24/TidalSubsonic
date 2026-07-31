@@ -36,13 +36,12 @@ pub struct TidalCredentials {
 
 impl TidalCredentials {
 	pub fn from_env() -> Result<Self, String> {
-		let missing: Vec<_> = ["TIDAL_API_TOKEN", "TIDAL_CLIENT_ID", "TIDAL_CLIENT_SECRET"]
-			.iter()
-			.filter(|&&key| env::var(key).is_err())
-			.copied()
-			.collect();
+		let mut missing_iter = ["TIDAL_API_TOKEN", "TIDAL_CLIENT_ID", "TIDAL_CLIENT_SECRET"]
+			.into_iter()
+			.filter(|&key| env::var(key).is_err());
 
-		if !missing.is_empty() {
+		if let Some(first) = missing_iter.next() {
+			let missing: Vec<_> = std::iter::once(first).chain(missing_iter).collect();
 			return Err(format!("Missing env vars: {:?}", missing));
 		}
 

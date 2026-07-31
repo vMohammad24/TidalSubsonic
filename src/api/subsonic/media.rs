@@ -75,14 +75,13 @@ pub async fn get_cover_art(
 				);
 			}
 		}
-	} else if let Some(stripped) = id.strip_prefix("COLLAGE:") {
-		let parts: Vec<&str> = stripped.split(',').collect();
-		if !parts.is_empty() {
-			image_url = format!(
-				"https://resources.tidal.com/images/{}/750x750.jpg",
-				parts[0].replace("-", "/")
-			);
-		}
+	} else if let Some(stripped) = id.strip_prefix("COLLAGE:")
+		&& let Some(first) = stripped.split(',').next()
+	{
+		image_url = format!(
+			"https://resources.tidal.com/images/{}/750x750.jpg",
+			first.replace("-", "/")
+		);
 	}
 
 	if !image_url.is_empty() {
@@ -474,9 +473,9 @@ pub async fn stream(
 				return HttpResponse::NotFound().finish();
 			}
 		};
-		if let Some(u) = manifest.urls.first().cloned() {
+		if let Some(u) = manifest.urls.first() {
 			return HttpResponse::Found()
-				.append_header(("Location", u))
+				.append_header(("Location", u.as_str()))
 				.finish();
 		}
 	} else if mime_type == "application/dash+xml" {
