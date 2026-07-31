@@ -61,7 +61,7 @@ async fn get_users(
 
 	let mut users_with_details = Vec::new();
 	for u in usernames {
-		if let Ok(Some((_, _, use_playlists, use_favorites))) =
+		if let Ok(Some((_, _, use_playlists, use_favorites, _))) =
 			manager.db.get_user_details(&u).await
 		{
 			let lastfm_username = manager
@@ -144,6 +144,7 @@ async fn create_user(
 			encrypted_password.as_deref(),
 			true,
 			true,
+			true,
 		)
 		.await
 		.is_err()
@@ -180,7 +181,7 @@ async fn update_features(
 			.json(serde_json::json!({ "error": "Missing username, feature, or enabled flag" }));
 	};
 
-	let (user_tidal_id, _, mut use_playlists, mut use_favorites) =
+	let (user_tidal_id, _, mut use_playlists, mut use_favorites, use_event_batch) =
 		match manager.db.get_user_details(username).await {
 			Ok(Some(d)) => d,
 			_ => {
@@ -207,7 +208,7 @@ async fn update_features(
 
 	let success = manager
 		.db
-		.update_user_feature_flags(username, use_playlists, use_favorites)
+		.update_user_feature_flags(username, use_playlists, use_favorites, use_event_batch)
 		.await
 		.unwrap_or(false);
 	HttpResponse::Ok().json(serde_json::json!({ "success": success }))
@@ -228,7 +229,7 @@ async fn delete_user(
 			.json(serde_json::json!({ "error": "Username is required" }));
 	};
 
-	let (user_tidal_id, _, _, _) = match manager.db.get_user_details(username).await {
+	let (user_tidal_id, _, _, _, _) = match manager.db.get_user_details(username).await {
 		Ok(Some(d)) => d,
 		_ => {
 			return HttpResponse::Forbidden().json(

@@ -1,0 +1,1 @@
+ALTER TABLE subsonic_users ADD COLUMN IF NOT EXISTS use_event_batch BOOLEAN DEFAULT FALSE;

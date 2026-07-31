@@ -42,6 +42,7 @@ pub struct UserExportData {
 	pub tidal_user_id: String,
 	pub use_playlists: bool,
 	pub use_favorites: bool,
+	pub use_event_batch: bool,
 	pub lastfm_username: Option<String>,
 }
 
@@ -122,14 +123,16 @@ impl DbManager {
 		encrypted_password: Option<&str>,
 		use_playlists: bool,
 		use_favorites: bool,
+		use_event_batch: bool,
 	) -> Result<(), sqlx::Error> {
 		sqlx::query!(
-            "INSERT INTO subsonic_users (username, tidal_user_id, password, use_playlists, use_favorites) VALUES ($1, $2, $3, $4, $5)",
+            "INSERT INTO subsonic_users (username, tidal_user_id, password, use_playlists, use_favorites, use_event_batch) VALUES ($1, $2, $3, $4, $5, $6)",
             username,
             tidal_user_id,
             encrypted_password,
             use_playlists,
-            use_favorites
+            use_favorites,
+            use_event_batch
         )
         .execute(&self.pool)
         .await?;
@@ -162,11 +165,13 @@ impl DbManager {
 		username: &str,
 		use_playlists: bool,
 		use_favorites: bool,
+		use_event_batch: bool,
 	) -> Result<bool, sqlx::Error> {
 		let result = sqlx::query!(
-			"UPDATE subsonic_users SET use_playlists = $1, use_favorites = $2 WHERE username = $3",
+			"UPDATE subsonic_users SET use_playlists = $1, use_favorites = $2, use_event_batch = $3 WHERE username = $4",
 			use_playlists,
 			use_favorites,
+			use_event_batch,
 			username
 		)
 		.execute(&self.pool)
@@ -177,13 +182,14 @@ impl DbManager {
 	pub async fn get_user_details(
 		&self,
 		username: &str,
-	) -> Result<Option<(String, String, bool, bool)>, sqlx::Error> {
+	) -> Result<Option<(String, String, bool, bool, bool)>, sqlx::Error> {
 		let row = sqlx::query!(
 			r#"SELECT
                 tidal_user_id,
                 COALESCE(password, '') as "password!",
                 use_playlists as "use_playlists!",
-                use_favorites as "use_favorites!"
+                use_favorites as "use_favorites!",
+                use_event_batch as "use_event_batch!"
             FROM subsonic_users WHERE username = $1"#,
 			username
 		)
@@ -196,6 +202,7 @@ impl DbManager {
 				r.password,
 				r.use_playlists,
 				r.use_favorites,
+				r.use_event_batch,
 			)
 		}))
 	}
@@ -349,6 +356,7 @@ impl DbManager {
                 u.tidal_user_id,
                 u.use_playlists as "use_playlists!",
                 u.use_favorites as "use_favorites!",
+                u.use_event_batch as "use_event_batch!",
                 l.lastfm_username
              FROM subsonic_users u
              LEFT JOIN user_lastfm_links l ON u.username = l.subsonic_username

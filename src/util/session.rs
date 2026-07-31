@@ -14,6 +14,7 @@ pub struct UserInfo {
 	pub lastfm_username: Option<String>,
 	pub use_playlists: bool,
 	pub use_favorites: bool,
+	pub use_event_batch: bool,
 	pub scrobbles: i64,
 }
 
@@ -53,7 +54,9 @@ pub async fn get_users_info(tidal_user_id: &str, db: &DbManager) -> Vec<UserInfo
 	let mut users = Vec::new();
 	if let Ok(usernames) = db.list_users_for_tidal_account(tidal_user_id).await {
 		for u in usernames {
-			if let Ok(Some((_, _, use_playlists, use_favorites))) = db.get_user_details(&u).await {
+			if let Ok(Some((_, _, use_playlists, use_favorites, use_event_batch))) =
+				db.get_user_details(&u).await
+			{
 				let lastfm_username = db
 					.get_lastfm_details(&u)
 					.await
@@ -66,6 +69,7 @@ pub async fn get_users_info(tidal_user_id: &str, db: &DbManager) -> Vec<UserInfo
 					lastfm_username,
 					use_playlists,
 					use_favorites,
+					use_event_batch,
 					scrobbles,
 				});
 			}

@@ -36,6 +36,8 @@ struct UpdateFeaturesForm {
 	use_playlists: Option<String>,
 	#[serde(default)]
 	use_favorites: Option<String>,
+	#[serde(default)]
+	use_event_batch: Option<String>,
 }
 
 #[derive(Template)]
@@ -198,6 +200,7 @@ async fn create_user_form(
 						Some(&encrypted_password),
 						true,
 						true,
+						true,
 					)
 					.await
 					.is_ok()
@@ -229,7 +232,7 @@ async fn delete_user_form(
 
 	let user_data = manager.db.get_user_details(&form.username).await;
 	let status = match user_data {
-		Ok(Some((user_tidal_id, _, _, _))) if user_tidal_id == tidal_user_id => {
+		Ok(Some((user_tidal_id, _, _, _, _))) if user_tidal_id == tidal_user_id => {
 			if manager.db.delete_user(&form.username).await.is_ok() {
 				Some(StatusMessage::Success("User deleted successfully".into()))
 			} else {
@@ -254,13 +257,19 @@ async fn update_features_form(
 
 	let user_data = manager.db.get_user_details(&form.username).await;
 	let status = match user_data {
-		Ok(Some((user_tidal_id, _, _, _))) if user_tidal_id == tidal_user_id => {
+		Ok(Some((user_tidal_id, _, _, _, _))) if user_tidal_id == tidal_user_id => {
 			let use_playlists = form.use_playlists.as_deref() == Some("true");
 			let use_favorites = form.use_favorites.as_deref() == Some("true");
+			let use_event_batch = form.use_event_batch.as_deref() == Some("true");
 
 			if manager
 				.db
-				.update_user_feature_flags(&form.username, use_playlists, use_favorites)
+				.update_user_feature_flags(
+					&form.username,
+					use_playlists,
+					use_favorites,
+					use_event_batch,
+				)
 				.await
 				.unwrap_or(false)
 			{

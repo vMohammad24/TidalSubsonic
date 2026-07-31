@@ -269,7 +269,7 @@ async fn link(
 	};
 
 	let user_details = manager.db.get_user_details(&username).await;
-	let (user_tidal_id, _, _, _) = match user_details {
+	let (user_tidal_id, _, _, _, _) = match user_details {
 		Ok(Some(d)) => d,
 		_ => {
 			return HttpResponse::Forbidden().json(serde_json::json!({
@@ -469,7 +469,7 @@ async fn link_form(
 	};
 
 	let user_details = manager.db.get_user_details(&form.username).await;
-	let (user_tidal_id, _, _, _) = match user_details {
+	let (user_tidal_id, _, _, _, _) = match user_details {
 		Ok(Some(d)) => d,
 		_ => {
 			set_flash(&session, "error", "User not found");

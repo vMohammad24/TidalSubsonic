@@ -119,7 +119,7 @@ where
 					let mut use_favorites = true;
 
 					if let Some(ref db) = (db)
-						&& let Ok(Some((_, enc_password, up, uf))) =
+						&& let Ok(Some((_, enc_password, up, uf, _))) =
 							db.get_user_details(&username).await
 						&& let Ok(plain_password) = crypto::decrypt_string(&enc_password)
 					{
