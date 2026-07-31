@@ -24,7 +24,7 @@ pub enum AppError {
 }
 
 impl AppError {
-	pub fn to_subsonic_code_and_msg(&self) -> (i32, String) {
+	pub fn into_subsonic_code_and_msg(self) -> (i32, String) {
 		match self {
 			AppError::Tidal(e) => {
 				tracing::error!("Upstream Tidal Error: {:?}", e);
@@ -39,10 +39,10 @@ impl AppError {
 				tracing::error!("Database Error: {:?}", e);
 				(0, "Internal server error".to_string())
 			}
-			AppError::NotFound(msg) => (70, msg.clone()),
-			AppError::BadRequest(msg) => (10, msg.clone()),
-			AppError::Auth(msg) => (40, msg.clone()),
-			AppError::Internal(msg) => (0, msg.clone()),
+			AppError::NotFound(msg) => (70, msg),
+			AppError::BadRequest(msg) => (10, msg),
+			AppError::Auth(msg) => (40, msg),
+			AppError::Internal(msg) => (0, msg),
 		}
 	}
 }

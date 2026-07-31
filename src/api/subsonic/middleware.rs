@@ -85,11 +85,14 @@ where
 
 		match auth_res {
 			Ok(query) => {
-				let mut format = query
-					.f
-					.clone()
-					.unwrap_or_else(|| "xml".to_string())
-					.to_lowercase();
+				let SubsonicQuery {
+					u: username,
+					p,
+					t,
+					s,
+					f,
+				} = query;
+				let mut format = f.unwrap_or_else(|| "xml".to_string()).to_lowercase();
 				if format != "json" && format != "jsonp" {
 					format = "xml".to_string();
 				}
@@ -100,11 +103,6 @@ where
 				let manager = req
 					.app_data::<web::Data<Arc<TidalClientManager>>>()
 					.map(|d| d.as_ref().clone());
-				let username = query.u.clone();
-				let t = query.t.clone();
-				let s = query.s.clone();
-				let p = query.p.clone();
-				let format = format.clone();
 
 				if path.ends_with("/getCoverArt.view")
 					|| path.ends_with("/getCoverArt")

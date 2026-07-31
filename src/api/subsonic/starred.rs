@@ -14,40 +14,34 @@ pub async fn get_starred(
 ) -> impl Responder {
 	let mut resp = SubsonicResponseWrapper::ok();
 
-	let api = subsonic_ctx.tidal_api.clone();
+	let api = &subsonic_ctx.tidal_api;
 
 	if subsonic_ctx.use_favorites {
-		let api_clone = api.clone();
-		let ctx_clone = subsonic_ctx.clone();
+		let api_clone = api;
+		let ctx_clone = &*subsonic_ctx;
 
 		let songs_fut = async {
 			if let Ok(track_ids) = db.get_local_favorite_tracks(&subsonic_ctx.user).await {
-				let api = api_clone.clone();
-				let ctx = ctx_clone.clone();
 				futures_util::stream::iter(track_ids)
-					.map(|id_str| {
-						let api = api.clone();
-						let ctx = ctx.clone();
-						async move {
-							match id_str.parse::<i64>() {
-								Ok(id) => match api.get_track(id).await {
-									Ok(track) => Some(
-										crate::api::subsonic::mapping::map_tidal_track_to_subsonic(
-											&track,
-											Some(&ctx),
-											None,
-											None,
-										),
+					.map(|id_str| async move {
+						match id_str.parse::<i64>() {
+							Ok(id) => match api_clone.get_track(id).await {
+								Ok(track) => Some(
+									crate::api::subsonic::mapping::map_tidal_track_to_subsonic(
+										&track,
+										Some(ctx_clone),
+										None,
+										None,
 									),
-									Err(e) => {
-										tracing::warn!(track_id = %id, error = ?e, "Failed to fetch favorited track");
-										None
-									}
-								},
+								),
 								Err(e) => {
-									tracing::error!(track_id = %id_str, error = ?e, "Failed to parse favorited track ID");
+									tracing::warn!(track_id = %id, error = ?e, "Failed to fetch favorited track");
 									None
 								}
+							},
+							Err(e) => {
+								tracing::error!(track_id = %id_str, error = ?e, "Failed to parse favorited track ID");
+								None
 							}
 						}
 					})
@@ -62,31 +56,25 @@ pub async fn get_starred(
 
 		let albums_fut = async {
 			if let Ok(album_ids) = db.get_local_favorite_albums(&subsonic_ctx.user).await {
-				let api = api_clone.clone();
-				let ctx = ctx_clone.clone();
 				futures_util::stream::iter(album_ids)
-					.map(|id_str| {
-						let api = api.clone();
-						let ctx = ctx.clone();
-						async move {
-							match id_str.parse::<i64>() {
-								Ok(id) => match api.get_album(id).await {
-									Ok(album) => Some(
-										crate::api::subsonic::mapping::map_tidal_album_to_subsonic(
-											&album,
-											Some(&ctx),
-											None,
-										),
+					.map(|id_str| async move {
+						match id_str.parse::<i64>() {
+							Ok(id) => match api_clone.get_album(id).await {
+								Ok(album) => Some(
+									crate::api::subsonic::mapping::map_tidal_album_to_subsonic(
+										&album,
+										Some(ctx_clone),
+										None,
 									),
-									Err(e) => {
-										tracing::warn!(album_id = %id, error = ?e, "Failed to fetch favorited album");
-										None
-									}
-								},
+								),
 								Err(e) => {
-									tracing::error!(album_id = %id_str, error = ?e, "Failed to parse favorited album ID");
+									tracing::warn!(album_id = %id, error = ?e, "Failed to fetch favorited album");
 									None
 								}
+							},
+							Err(e) => {
+								tracing::error!(album_id = %id_str, error = ?e, "Failed to parse favorited album ID");
+								None
 							}
 						}
 					})
@@ -101,30 +89,24 @@ pub async fn get_starred(
 
 		let artists_fut = async {
 			if let Ok(artist_ids) = db.get_local_favorite_artists(&subsonic_ctx.user).await {
-				let api = api_clone.clone();
-				let ctx = ctx_clone.clone();
 				futures_util::stream::iter(artist_ids)
-					.map(|id_str| {
-						let api = api.clone();
-						let ctx = ctx.clone();
-						async move {
-							match id_str.parse::<i64>() {
-								Ok(id) => match api.get_artist(id).await {
-									Ok(artist) => Some(
-										crate::api::subsonic::mapping::map_tidal_artist_to_subsonic(
-											&artist,
-											Some(&ctx),
-										),
+					.map(|id_str| async move {
+						match id_str.parse::<i64>() {
+							Ok(id) => match api_clone.get_artist(id).await {
+								Ok(artist) => Some(
+									crate::api::subsonic::mapping::map_tidal_artist_to_subsonic(
+										&artist,
+										Some(ctx_clone),
 									),
-									Err(e) => {
-										tracing::warn!(artist_id = %id, error = ?e, "Failed to fetch favorited artist");
-										None
-									}
-								},
+								),
 								Err(e) => {
-									tracing::error!(artist_id = %id_str, error = ?e, "Failed to parse favorited artist ID");
+									tracing::warn!(artist_id = %id, error = ?e, "Failed to fetch favorited artist");
 									None
 								}
+							},
+							Err(e) => {
+								tracing::error!(artist_id = %id_str, error = ?e, "Failed to parse favorited artist ID");
+								None
 							}
 						}
 					})
@@ -285,7 +267,7 @@ pub async fn star(
 			);
 		}
 	} else {
-		let api = subsonic_ctx.tidal_api.clone();
+		let api = &subsonic_ctx.tidal_api;
 
 		if let Some(id) = id_parsed {
 			let _ = api.add_favorite_track(id).await;
@@ -351,7 +333,7 @@ pub async fn unstar(
 			crate::tidal::favorites::remove_local_favorite(&subsonic_ctx.user, id);
 		}
 	} else {
-		let api = subsonic_ctx.tidal_api.clone();
+		let api = &subsonic_ctx.tidal_api;
 
 		if let Some(id) = id_parsed {
 			let _ = api.remove_favorite_track(id).await;

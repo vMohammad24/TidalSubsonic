@@ -261,13 +261,14 @@ async fn link(
 		}));
 	};
 
-	let Some(username) = &query.username else {
+	let q = query.into_inner();
+	let Some(username) = q.username else {
 		return HttpResponse::BadRequest().json(serde_json::json!({
 			"error": "Missing username parameter"
 		}));
 	};
 
-	let user_details = manager.db.get_user_details(username).await;
+	let user_details = manager.db.get_user_details(&username).await;
 	let (user_tidal_id, _, _, _) = match user_details {
 		Ok(Some(d)) => d,
 		_ => {
@@ -313,9 +314,9 @@ async fn link(
 	if let Ok(mut store_write) = store.write() {
 		store_write.retain(|_, v| v.expiration_time >= now_ms);
 		store_write.insert(
-			state.clone(),
+			state,
 			TokenState {
-				username: username.clone(),
+				username,
 				expiration_time,
 			},
 		);
@@ -343,7 +344,8 @@ async fn callback(
 	manager: web::Data<Arc<TidalClientManager>>,
 	store: web::Data<TokenStore>,
 ) -> impl Responder {
-	let (Some(token), Some(state)) = (&query.token, &query.state) else {
+	let q = query.into_inner();
+	let (Some(token), Some(state)) = (q.token, q.state) else {
 		return HttpResponse::BadRequest().json(serde_json::json!({
 			"error": "Missing required parameters: token or state"
 		}));
@@ -357,11 +359,11 @@ async fn callback(
 			}));
 		};
 
-		if let Some(s) = store_write.get(state) {
+		if let Some(s) = store_write.get(&state) {
 			let now = chrono::Utc::now().timestamp_millis() as u64;
 
 			if s.expiration_time < now {
-				store_write.remove(state);
+				store_write.remove(&state);
 				None
 			} else {
 				Some(s.clone())
@@ -389,7 +391,7 @@ async fn callback(
 	let mut params = BTreeMap::new();
 	params.insert("api_key".to_string(), lastfm_api_key);
 	params.insert("method".to_string(), "auth.getSession".to_string());
-	params.insert("token".to_string(), token.clone());
+	params.insert("token".to_string(), token);
 
 	sign_and_format_params(&mut params, &lastfm_api_secret);
 
@@ -456,6 +458,7 @@ async fn link_form(
 	store: web::Data<TokenStore>,
 	manager: web::Data<Arc<TidalClientManager>>,
 ) -> impl Responder {
+	let form = form.into_inner();
 	let Some(tidal_user_id) = extract_user_id(&req, &manager).await else {
 		set_flash(&session, "error", "Not authenticated");
 		return HttpResponse::SeeOther()
@@ -512,7 +515,7 @@ async fn link_form(
 		store_write.insert(
 			state,
 			TokenState {
-				username: form.username.clone(),
+				username: form.username,
 				expiration_time,
 			},
 		);
@@ -562,10 +565,11 @@ pub async fn get_top_albums_by_tags(
 		let limit_str = limit.to_string();
 
 		async move {
+			let tag_name = tag.name;
 			let mut album_params = BTreeMap::new();
 			album_params.insert("api_key".to_string(), api_key);
 			album_params.insert("method".to_string(), "tag.getTopAlbums".to_string());
-			album_params.insert("tag".to_string(), tag.name.clone());
+			album_params.insert("tag".to_string(), tag_name.clone());
 			album_params.insert("limit".to_string(), limit_str);
 
 			sign_and_format_params(&mut album_params, &api_secret);
@@ -581,7 +585,7 @@ pub async fn get_top_albums_by_tags(
 						Some(data.albums.album)
 					} else {
 						tracing::warn!(
-							tag = %tag.name,
+							tag = %tag_name,
 							"Failed to deserialize tag.getTopAlbums JSON response"
 						);
 						None
@@ -589,7 +593,7 @@ pub async fn get_top_albums_by_tags(
 				}
 				Err(e) => {
 					tracing::warn!(
-						tag = %tag.name,
+						tag = %tag_name,
 						error = %e,
 						"Network request failed for tag.getTopAlbums"
 					);

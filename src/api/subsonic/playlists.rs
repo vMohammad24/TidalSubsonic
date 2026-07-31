@@ -25,7 +25,7 @@ pub async fn create_playlist(
 ) -> impl Responder {
 	let mut resp = SubsonicResponseWrapper::ok();
 
-	let api = subsonic_ctx.tidal_api.clone();
+	let api = &subsonic_ctx.tidal_api;
 	let desc = query.description.as_ref().or(query.comment.as_ref());
 
 	if subsonic_ctx.use_playlists {
@@ -100,7 +100,7 @@ pub async fn delete_playlist(
 			));
 		}
 	} else {
-		let api = subsonic_ctx.tidal_api.clone();
+		let api = &subsonic_ctx.tidal_api;
 		let _ = api.delete_playlist(&query.id).await;
 	}
 
@@ -129,7 +129,7 @@ pub async fn update_playlist(
 	subsonic_ctx: actix_web::web::ReqData<crate::api::subsonic::middleware::SubsonicContext>,
 	db: web::Data<Arc<crate::db::DbManager>>,
 ) -> impl Responder {
-	let api = subsonic_ctx.tidal_api.clone();
+	let api = &subsonic_ctx.tidal_api;
 	let desc = query.description.as_ref().or(query.comment.as_ref());
 
 	if subsonic_ctx.use_playlists {
@@ -210,7 +210,7 @@ pub async fn get_playlists(
 	db: web::Data<Arc<crate::db::DbManager>>,
 ) -> impl Responder {
 	let mut resp = SubsonicResponseWrapper::ok();
-	let api = subsonic_ctx.tidal_api.clone();
+	let api = &subsonic_ctx.tidal_api;
 	let mut all_playlists = Vec::new();
 
 	if subsonic_ctx.use_playlists {
@@ -231,11 +231,7 @@ pub async fn get_playlists(
 		if let Ok(mixes) = api.get_user_mixes().await {
 			let fetch_futures: Vec<_> = mixes
 				.iter()
-				.map(|mix| {
-					let api = api.clone();
-					let id = mix.id.clone();
-					async move { api.get_openapi_playlist_detail(&id).await.ok() }
-				})
+				.map(|mix| async move { api.get_openapi_playlist_detail(&mix.id).await.ok() })
 				.collect();
 			let details = join_all(fetch_futures).await;
 
@@ -269,44 +265,40 @@ pub async fn get_playlist(
 	db: web::Data<Arc<crate::db::DbManager>>,
 ) -> impl Responder {
 	let mut resp = SubsonicResponseWrapper::ok();
-	let api = subsonic_ctx.tidal_api.clone();
+	let api = &subsonic_ctx.tidal_api;
+	let playlist_id = query.0.id;
 
-	if let Some(actual_id) = query.id.strip_prefix("v2_") {
+	if let Some(actual_id) = playlist_id.strip_prefix("v2_") {
 		match api.get_openapi_playlist_detail(actual_id).await {
 			Ok(detail) => {
-				let api_clone = api.clone();
-				let ctx = subsonic_ctx.clone();
-				let cover = detail.cover_art.clone();
+				let ctx = &*subsonic_ctx;
+				let cover = detail.cover_art;
 
 				let songs: Vec<_> = futures_util::stream::iter(detail.track_ids)
-					.map(|track_id| {
-						let api = api_clone.clone();
-						let ctx = ctx.clone();
-						async move {
-							match track_id.parse::<i64>() {
-								Ok(track_id_i64) => match api.get_track(track_id_i64).await {
-									Ok(track) => {
-										Some(map_tidal_track_to_subsonic(&track, Some(&ctx), None, None))
-									}
-									Err(e) => {
-										tracing::warn!(track_id = %track_id_i64, error = ?e, "Failed to fetch track for mix playlist");
-										None
-									}
-								},
+					.map(|track_id| async move {
+						match track_id.parse::<i64>() {
+							Ok(track_id_i64) => match api.get_track(track_id_i64).await {
+								Ok(track) => {
+									Some(map_tidal_track_to_subsonic(&track, Some(ctx), None, None))
+								}
 								Err(e) => {
-									tracing::error!(track_id = %track_id, error = ?e, "Failed to parse mix track ID");
+									tracing::warn!(track_id = %track_id_i64, error = ?e, "Failed to fetch track for mix playlist");
 									None
 								}
+							},
+							Err(e) => {
+								tracing::error!(track_id = %track_id, error = ?e, "Failed to parse mix track ID");
+								None
 							}
 						}
 					})
 					.buffered(50)
-					.filter_map(|s| async { s })
+					.filter_map(std::future::ready)
 					.collect()
 					.await;
 
 				let sub_playlist = SubsonicPlaylist {
-					id: query.id.clone(),
+					id: playlist_id,
 					name: detail.name,
 					owner: Some("Tidal".to_string()),
 					public: Some(false),
@@ -329,7 +321,7 @@ pub async fn get_playlist(
 	}
 
 	if subsonic_ctx.use_playlists {
-		let id = match Uuid::parse_str(&query.id) {
+		let id = match Uuid::parse_str(&playlist_id) {
 			Ok(uuid) => uuid,
 			Err(_) => {
 				return SubsonicResponder(SubsonicResponseWrapper::error(
@@ -343,33 +335,28 @@ pub async fn get_playlist(
 			let mut sub_playlist = map_local_playlist_to_subsonic(&playlist);
 
 			if let Ok(track_ids) = db.get_local_playlist_tracks(id).await {
-				let api_clone = api.clone();
-				let subsonic_ctx_clone = subsonic_ctx.clone();
+				let ctx = &*subsonic_ctx;
 
 				let songs: Vec<_> = futures_util::stream::iter(track_ids)
-					.map(|track_id| {
-						let api = api_clone.clone();
-						let ctx = subsonic_ctx_clone.clone();
-						async move {
-							match track_id.parse::<i64>() {
-								Ok(track_id_i64) => match api.get_track(track_id_i64).await {
-									Ok(track) => {
-										Some(map_tidal_track_to_subsonic(&track, Some(&ctx), None, None))
-									}
-									Err(e) => {
-										tracing::warn!(track_id = %track_id_i64, error = ?e, "Failed to fetch track for playlist");
-										None
-									}
-								},
+					.map(|track_id| async move {
+						match track_id.parse::<i64>() {
+							Ok(track_id_i64) => match api.get_track(track_id_i64).await {
+								Ok(track) => {
+									Some(map_tidal_track_to_subsonic(&track, Some(ctx), None, None))
+								}
 								Err(e) => {
-									tracing::error!(track_id = %track_id, error = ?e, "Failed to parse track ID");
+									tracing::warn!(track_id = %track_id_i64, error = ?e, "Failed to fetch track for playlist");
 									None
 								}
+							},
+							Err(e) => {
+								tracing::error!(track_id = %track_id, error = ?e, "Failed to parse track ID");
+								None
 							}
 						}
 					})
 					.buffered(50)
-					.filter_map(|s| async { s })
+					.filter_map(std::future::ready)
 					.collect()
 					.await;
 
@@ -379,10 +366,10 @@ pub async fn get_playlist(
 			resp.response.playlist = Some(sub_playlist);
 			return SubsonicResponder(resp);
 		}
-	} else if let Ok(playlist) = api.get_playlist(&query.id).await {
+	} else if let Ok(playlist) = api.get_playlist(&playlist_id).await {
 		let mut sub_playlist = map_tidal_playlist_to_subsonic(&playlist, Some(&subsonic_ctx.user));
 
-		if let Ok(tracks_res) = api.get_playlist_tracks(&query.id, 1000, 0).await {
+		if let Ok(tracks_res) = api.get_playlist_tracks(&playlist_id, 1000, 0).await {
 			let songs: Vec<_> = tracks_res
 				.items
 				.into_iter()

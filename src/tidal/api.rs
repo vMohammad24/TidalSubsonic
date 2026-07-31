@@ -69,8 +69,8 @@ fn best_artwork_url(attrs: &ArtworkAttrs) -> Option<String> {
 	files
 		.iter()
 		.find(|f| f.meta.width == 320 && f.meta.height == 320)
+		.or_else(|| files.first())
 		.map(|f| f.href.clone())
-		.or_else(|| files.first().map(|f| f.href.clone()))
 }
 
 #[derive(Clone)]
@@ -255,7 +255,7 @@ impl TidalApi {
 	> {
 		let limit_str = limit.to_string();
 		let offset_str = offset.to_string();
-		let query = vec![
+		let query = [
 			("limit", limit_str.as_str()),
 			("offset", offset_str.as_str()),
 		];
@@ -265,7 +265,7 @@ impl TidalApi {
 			>>(
 				Method::GET,
 				&format!("/tracks/{}/recommendations", track_id),
-				Some(query.as_slice()),
+				Some(&query),
 				None,
 				ApiVersion::V1,
 			)
@@ -321,7 +321,7 @@ impl TidalApi {
 		if let Ok(ref bio_res) = res
 			&& let Ok(bio_value) = serde_json::to_value(bio_res)
 		{
-			let key = cache_key.clone();
+			let key = cache_key;
 
 			tokio::spawn(async move {
 				MISC_CACHE.insert(key, bio_value).await;
@@ -421,7 +421,7 @@ impl TidalApi {
 								.and_then(|d| art_to_url.get(&d.id).cloned());
 
 							all_mixes.push(crate::tidal::models::entities::MixPlaylistInfo {
-								id: pl.id.clone(),
+								id: pl.id,
 								name: pl.attributes.name.unwrap_or_else(|| "Mix".to_string()),
 								description: pl.attributes.description,
 								cover_art,
@@ -575,25 +575,25 @@ impl TidalApi {
 			let res_for_cache = res.clone();
 
 			tokio::spawn(async move {
-				SEARCH_CACHE.insert(query_key, res_for_cache.clone()).await;
-
-				if let Some(tracks) = res_for_cache.tracks {
-					for track in tracks.items {
-						TRACK_CACHE.insert(track.id, track).await;
+				if let Some(ref tracks) = res_for_cache.tracks {
+					for track in &tracks.items {
+						TRACK_CACHE.insert(track.id, track.clone()).await;
 					}
 				}
 
-				if let Some(albums) = res_for_cache.albums {
-					for album in albums.items {
-						ALBUM_CACHE.insert(album.id, album).await;
+				if let Some(ref albums) = res_for_cache.albums {
+					for album in &albums.items {
+						ALBUM_CACHE.insert(album.id, album.clone()).await;
 					}
 				}
 
-				if let Some(artists) = res_for_cache.artists {
-					for artist in artists.items {
-						ARTIST_CACHE.insert(artist.id, artist).await;
+				if let Some(ref artists) = res_for_cache.artists {
+					for artist in &artists.items {
+						ARTIST_CACHE.insert(artist.id, artist.clone()).await;
 					}
 				}
+
+				SEARCH_CACHE.insert(query_key, res_for_cache).await;
 			});
 		}
 
@@ -1023,15 +1023,13 @@ impl TidalApi {
 		title: Option<&str>,
 		description: Option<&str>,
 	) -> Result<(), TidalError> {
-		let mut form = Vec::new();
+		let mut body: Vec<(&str, String)> = Vec::new();
 		if let Some(t) = title {
-			form.push(("title".to_string(), t.to_string()));
+			body.push(("title", t.to_string()));
 		}
 		if let Some(desc) = description {
-			form.push(("description".to_string(), desc.to_string()));
+			body.push(("description", desc.to_string()));
 		}
-
-		let body: Vec<(&str, String)> = form.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();
 
 		self.session
 			.request::<()>(

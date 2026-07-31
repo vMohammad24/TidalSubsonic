@@ -32,7 +32,7 @@ impl Responder for ApiResult {
 		match self.0 {
 			Ok(wrapper) => SubsonicResponder(wrapper).respond_to(req),
 			Err(err) => {
-				let (code, msg) = err.to_subsonic_code_and_msg();
+				let (code, msg) = err.into_subsonic_code_and_msg();
 				let error_wrapper = SubsonicResponseWrapper::error(code, &msg);
 				SubsonicResponder(error_wrapper).respond_to(req)
 			}
@@ -74,16 +74,17 @@ impl Responder for SubsonicResponder {
 	type Body = BoxBody;
 
 	fn respond_to(self, req: &HttpRequest) -> HttpResponse<Self::Body> {
-		let format = req
-			.extensions()
-			.get::<SubsonicContext>()
-			.map(|ctx| ctx.format.clone())
-			.unwrap_or_else(|| {
-				serde_qs::from_str::<HashMap<String, String>>(req.query_string())
-					.ok()
-					.and_then(|q| q.get("f").cloned())
-					.unwrap_or_else(|| "xml".to_string())
-			});
+		let extensions = req.extensions();
+		let format_owned;
+		let format: &str = if let Some(ctx) = extensions.get::<SubsonicContext>() {
+			ctx.format.as_str()
+		} else {
+			format_owned = serde_qs::from_str::<HashMap<String, String>>(req.query_string())
+				.ok()
+				.and_then(|q| q.get("f").cloned())
+				.unwrap_or_else(|| "xml".to_string());
+			&format_owned
+		};
 
 		if format == "xml" {
 			return match to_string(&self.0.response) {

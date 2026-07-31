@@ -17,7 +17,7 @@ pub struct GetUserQuery {
 pub async fn get_user(query: web::Query<GetUserQuery>) -> impl Responder {
 	let mut resp = SubsonicResponseWrapper::ok();
 	resp.response.user = Some(User {
-		username: query.username.clone(),
+		username: query.into_inner().username,
 		admin_role: true,
 		settings_role: true,
 		download_role: true,

@@ -95,7 +95,7 @@ pub async fn get_top_songs(
 	query: web::Query<TopSongsQuery>,
 	subsonic_ctx: actix_web::web::ReqData<crate::api::subsonic::middleware::SubsonicContext>,
 ) -> impl Responder {
-	let api = subsonic_ctx.tidal_api.clone();
+	let api = &subsonic_ctx.tidal_api;
 	let mut resp = SubsonicResponseWrapper::ok();
 
 	let count = query.count.unwrap_or(50).clamp(1, 500) as u32;
@@ -135,7 +135,7 @@ pub async fn get_similar_songs(
 	query: web::Query<IdQuery>,
 	subsonic_ctx: actix_web::web::ReqData<crate::api::subsonic::middleware::SubsonicContext>,
 ) -> impl Responder {
-	let api = subsonic_ctx.tidal_api.clone();
+	let api = &subsonic_ctx.tidal_api;
 	let mut resp = SubsonicResponseWrapper::ok();
 	let limit = query.count.unwrap_or(50).clamp(1, 500) as u32;
 
@@ -171,7 +171,7 @@ pub async fn get_album_info(
 ) -> impl Responder {
 	let is_v2 = req.path().contains("getAlbumInfo2");
 	let mut resp = SubsonicResponseWrapper::ok();
-	let api = subsonic_ctx.tidal_api.clone();
+	let api = &subsonic_ctx.tidal_api;
 
 	if let Ok(id) = query.id.parse::<i64>() {
 		let album = if let Ok(album) = api.get_album(id).await {
@@ -228,7 +228,7 @@ pub async fn get_artist_info(
 ) -> impl Responder {
 	let is_v2 = req.path().contains("getArtistInfo2");
 	let mut resp = SubsonicResponseWrapper::ok();
-	let api = subsonic_ctx.tidal_api.clone();
+	let api = &subsonic_ctx.tidal_api;
 
 	if let Ok(artist_id) = query.id.parse::<i64>()
 		&& let Ok(artist) = api.get_artist(artist_id).await
@@ -302,16 +302,17 @@ pub async fn get_random_songs(
 	query: web::Query<RandomSongsQuery>,
 	subsonic_ctx: web::ReqData<SubsonicContext>,
 ) -> impl Responder {
-	let size = query.size.unwrap_or(10).clamp(1, 500);
-	let genre = query.genre.clone().unwrap_or_else(|| "16".to_string());
+	let q = query.into_inner();
+	let size = q.size.unwrap_or(10).clamp(1, 500);
+	let genre = q.genre.as_deref().unwrap_or("16");
 
 	let mut response = SubsonicResponseWrapper::ok();
 
-	let api = subsonic_ctx.tidal_api.clone();
+	let api = &subsonic_ctx.tidal_api;
 	let mut random_songs = Vec::new();
 
 	if let Ok(tracks_result) = api
-		.get_genre_tracks(&genre, std::cmp::max(size * 2, 50), 0)
+		.get_genre_tracks(genre, std::cmp::max(size * 2, 50), 0)
 		.await
 	{
 		let mut tracks = tracks_result.items;
@@ -357,7 +358,7 @@ pub async fn get_songs_by_genre(
 
 	let mut response = SubsonicResponseWrapper::ok();
 
-	let api = subsonic_ctx.tidal_api.clone();
+	let api = &subsonic_ctx.tidal_api;
 	let mut genre_songs = Vec::new();
 
 	if let Ok(tracks_result) = api.get_genre_tracks(genre, count, offset).await {
@@ -379,7 +380,7 @@ pub async fn get_songs_by_genre(
 pub async fn get_genres(subsonic_ctx: actix_web::web::ReqData<SubsonicContext>) -> impl Responder {
 	let mut resp = SubsonicResponseWrapper::ok();
 
-	let api = subsonic_ctx.tidal_api.clone();
+	let api = &subsonic_ctx.tidal_api;
 
 	if let Ok(categories) = api.get_categories().await {
 		let mut genres = Vec::new();
@@ -441,11 +442,8 @@ pub async fn get_album_list(
 		if let Ok(lfm_albums) = lfm_res {
 			let mut search_stream = stream::iter(lfm_albums)
 				.map(|lfm| {
-					let api = api.clone();
-					async move {
-						let query = format!("{} {}", lfm.album, lfm.artist);
-						api.search(&query, 1, 0).await.ok()
-					}
+					let query = format!("{} {}", lfm.album, lfm.artist);
+					async move { api.search(&query, 1, 0).await.ok() }
 				})
 				.buffered(50);
 
@@ -531,7 +529,7 @@ pub async fn get_album(
 ) -> ApiResult {
 	ApiResult::from_result(
 		async move {
-			let api = subsonic_ctx.tidal_api.clone();
+			let api = &subsonic_ctx.tidal_api;
 			let mut resp = SubsonicResponseWrapper::ok();
 
 			let album_id = query
@@ -573,7 +571,7 @@ pub async fn get_artist(
 ) -> ApiResult {
 	ApiResult::from_result(
 		async move {
-			let api = subsonic_ctx.tidal_api.clone();
+			let api = &subsonic_ctx.tidal_api;
 			let mut resp = SubsonicResponseWrapper::ok();
 
 			let artist_id = query
@@ -618,7 +616,7 @@ pub async fn get_song(
 ) -> ApiResult {
 	ApiResult::from_result(
 		async move {
-			let api = subsonic_ctx.tidal_api.clone();
+			let api = &subsonic_ctx.tidal_api;
 			let mut resp = SubsonicResponseWrapper::ok();
 
 			let track_id = query
@@ -644,7 +642,7 @@ pub async fn get_music_directory(
 	query: web::Query<IdQuery>,
 	subsonic_ctx: actix_web::web::ReqData<SubsonicContext>,
 ) -> impl Responder {
-	let api = subsonic_ctx.tidal_api.clone();
+	let api = &subsonic_ctx.tidal_api;
 	let mut resp = SubsonicResponseWrapper::ok();
 
 	if query.id == "1" {
@@ -658,12 +656,14 @@ pub async fn get_music_directory(
 				&artist_entry.1,
 				Some(&subsonic_ctx),
 			);
+			let artist_id = artist.id;
+			let artist_name = artist.name;
 			children.push(Child {
-				id: artist.id.clone(),
+				id: artist_id.clone(),
 				parent: Some("1".to_string()),
-				title: artist.name.clone(),
+				title: artist_name.clone(),
 				album: None,
-				artist: Some(artist.name.clone()),
+				artist: Some(artist_name),
 				is_dir: true,
 				is_video: None,
 				type_: None,
@@ -672,7 +672,7 @@ pub async fn get_music_directory(
 				bit_rate: None,
 				track: None,
 				album_id: None,
-				artist_id: Some(artist.id),
+				artist_id: Some(artist_id),
 				size: None,
 				suffix: None,
 				content_type: None,
@@ -696,6 +696,7 @@ pub async fn get_music_directory(
 	}
 
 	if let Ok(num_id) = query.id.parse::<i64>() {
+		let folder_id = query.id.clone();
 		if let Ok(tidal_album) = api.get_album(num_id).await {
 			let mut children = Vec::new();
 			if let Ok(tracks) = api.get_album_tracks(num_id, 500, 0).await {
@@ -707,36 +708,36 @@ pub async fn get_music_directory(
 						None,
 					);
 					children.push(Child {
-						id: song.id.clone(),
-						parent: Some(query.id.clone()),
-						title: song.title.clone(),
-						album: Some(song.album.clone()),
-						artist: Some(song.artist.clone()),
+						id: song.id,
+						parent: Some(folder_id.clone()),
+						title: song.title,
+						album: Some(song.album),
+						artist: Some(song.artist),
 						is_dir: false,
 						is_video: Some(song.is_video),
-						type_: Some(song.type_.clone()),
-						cover_art: Some(song.cover_art.clone()),
+						type_: Some(song.type_),
+						cover_art: Some(song.cover_art),
 						duration: Some(song.duration),
 						bit_rate: Some(song.bit_rate),
 						track: Some(song.track),
-						album_id: Some(song.album_id.clone()),
-						artist_id: Some(song.artist_id.clone()),
+						album_id: Some(song.album_id),
+						artist_id: Some(song.artist_id),
 						size: Some(song.size),
-						suffix: Some(song.suffix.clone()),
-						content_type: Some(song.content_type.clone()),
+						suffix: Some(song.suffix),
+						content_type: Some(song.content_type),
 						year: song.year,
-						genre: song.genre.clone(),
+						genre: song.genre,
 						starred: song.starred,
-						path: song.path.clone(),
+						path: song.path,
 						play_count: song.play_count,
 						disc_number: song.disc_number,
-						created: song.created.clone(),
-						explicit_status: song.explicit_status.clone(),
+						created: song.created,
+						explicit_status: song.explicit_status,
 					});
 				}
 			}
 			resp.response.directory = Some(Directory {
-				id: query.id.clone(),
+				id: folder_id,
 				parent: None,
 				name: tidal_album.title,
 				child: Some(children),
@@ -758,20 +759,20 @@ pub async fn get_music_directory(
 						Some(std::slice::from_ref(&tidal_artist)),
 					);
 					children.push(Child {
-						id: album.id.clone(),
-						parent: Some(query.id.clone()),
-						title: album.name.clone(),
+						id: album.id,
+						parent: Some(folder_id.clone()),
+						title: album.name,
 						album: None,
-						artist: Some(album.artist.clone()),
+						artist: Some(album.artist),
 						is_dir: true,
 						is_video: None,
 						type_: None,
-						cover_art: Some(album.cover_art.clone()),
+						cover_art: Some(album.cover_art),
 						duration: Some(album.duration),
 						bit_rate: None,
 						track: None,
 						album_id: None,
-						artist_id: Some(album.artist_id.clone()),
+						artist_id: Some(album.artist_id),
 						size: None,
 						suffix: None,
 						content_type: None,
@@ -781,13 +782,13 @@ pub async fn get_music_directory(
 						path: None,
 						play_count: None,
 						disc_number: None,
-						created: Some(album.created.clone()),
-						explicit_status: album.explicit_status.clone(),
+						created: Some(album.created),
+						explicit_status: album.explicit_status,
 					});
 				}
 			}
 			resp.response.directory = Some(Directory {
-				id: query.id.clone(),
+				id: folder_id,
 				parent: Some("1".to_string()),
 				name: tidal_artist.name,
 				child: Some(children),

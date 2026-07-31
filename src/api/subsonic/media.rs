@@ -44,33 +44,28 @@ pub async fn get_cover_art(
 			id.replace("-", "/")
 		);
 	} else if let Ok(numeric_id) = id.parse::<i64>() {
-		let subsonic_ctx = req
+		let api = req
 			.extensions()
 			.get::<crate::api::subsonic::middleware::SubsonicContext>()
-			.cloned();
+			.map(|ctx| ctx.tidal_api.clone());
 
-		if let Some(ctx) = subsonic_ctx {
-			let api = ctx.tidal_api.clone();
-
+		if let Some(api) = api {
 			let mut cover_uuid = None;
 
 			if let Ok(track) = api.get_track(numeric_id).await {
-				cover_uuid = track.album.cover.clone();
+				cover_uuid = track.album.cover;
 			}
 
 			if cover_uuid.is_none()
 				&& let Ok(album) = api.get_album(numeric_id).await
 			{
-				cover_uuid = album.cover.clone();
+				cover_uuid = album.cover;
 			}
 
 			if cover_uuid.is_none()
 				&& let Ok(artist) = api.get_artist(numeric_id).await
 			{
-				cover_uuid = artist
-					.picture
-					.clone()
-					.or(artist.selected_album_cover_fallback.clone());
+				cover_uuid = artist.picture.or(artist.selected_album_cover_fallback);
 			}
 
 			if let Some(uuid) = cover_uuid {
@@ -211,23 +206,23 @@ fn parse_dash_manifest(xml: &str) -> Result<DashManifest, String> {
 		buf.clear();
 	}
 
-	if let Some(ref init) = init_url {
-		urls.push(init.clone());
-	}
-	if let Some(ref media) = media_url {
-		for i in 0..total_segments {
-			let num = start_number + i;
-			let url = media.replace("$Number$", &num.to_string());
-			urls.push(url);
-		}
-	}
-
 	tracing::debug!(
 		"Parsed DASH manifest: {} segments, init URL: {:?}, media URL template: {:?}",
 		total_segments,
 		init_url,
 		media_url
 	);
+
+	if let Some(init) = init_url {
+		urls.push(init);
+	}
+	if let Some(media) = media_url {
+		for i in 0..total_segments {
+			let num = start_number + i;
+			let url = media.replace("$Number$", &num.to_string());
+			urls.push(url);
+		}
+	}
 
 	if urls.is_empty() {
 		return Err("No URLs found in DASH manifest".to_string());
@@ -240,7 +235,7 @@ pub async fn download(
 	query: web::Query<DownloadQuery>,
 	subsonic_ctx: actix_web::web::ReqData<crate::api::subsonic::middleware::SubsonicContext>,
 ) -> HttpResponse {
-	let api = subsonic_ctx.tidal_api.clone();
+	let api = &subsonic_ctx.tidal_api;
 	let id = match query.id.parse::<i64>() {
 		Ok(i) => i,
 		Err(e) => {
@@ -261,17 +256,14 @@ pub async fn download(
 			};
 
 			stream::iter(album.items)
-				.map(|track| {
-					let api_clone = api.clone();
-					async move {
-						match api_clone.get_stream_url(track.id).await {
-							Ok(info) => Some((info, track.title)),
-							Err(_) => None,
-						}
+				.map(|track| async move {
+					match api.get_stream_url(track.id).await {
+						Ok(info) => Some((info, track.title)),
+						Err(_) => None,
 					}
 				})
 				.buffered(15)
-				.filter_map(|x| async { x })
+				.filter_map(std::future::ready)
 				.collect()
 				.await
 		}
@@ -296,7 +288,7 @@ pub async fn download(
 					&& let Some(u) = manifest.urls.first()
 				{
 					return HttpResponse::Found()
-						.append_header(("Location", u.clone()))
+						.append_header(("Location", u.as_str()))
 						.finish();
 				}
 			} else if mime_type == "application/dash+xml"
@@ -306,6 +298,11 @@ pub async fn download(
 					"audio/flac".to_string()
 				} else {
 					manifest.mime_type
+				};
+				let ext = if content_type.contains("mp4") || content_type.contains("m4a") {
+					"m4a"
+				} else {
+					"flac"
 				};
 
 				let stream = stream::iter(manifest.urls)
@@ -333,18 +330,10 @@ pub async fn download(
 					.flatten();
 
 				return HttpResponse::Ok()
-					.content_type(content_type.clone())
+					.content_type(content_type)
 					.append_header((
 						"Content-Disposition",
-						format!(
-							"attachment; filename=\"{}.{}\"",
-							title,
-							if content_type.contains("mp4") || content_type.contains("m4a") {
-								"m4a"
-							} else {
-								"flac"
-							}
-						),
+						format!("attachment; filename=\"{}.{}\"", title, ext),
 					))
 					.streaming(stream);
 			}
@@ -441,7 +430,7 @@ pub async fn stream(
 	query: web::Query<StreamQuery>,
 	subsonic_ctx: actix_web::web::ReqData<crate::api::subsonic::middleware::SubsonicContext>,
 ) -> HttpResponse {
-	let api = subsonic_ctx.tidal_api.clone();
+	let api = &subsonic_ctx.tidal_api;
 	let id = match query.id.parse::<i64>() {
 		Ok(i) => i,
 		Err(e) => {
@@ -553,7 +542,7 @@ pub async fn get_lyrics(
 	query: web::Query<GetLyricsQuery>,
 	subsonic_ctx: actix_web::web::ReqData<crate::api::subsonic::middleware::SubsonicContext>,
 ) -> impl Responder {
-	let api = subsonic_ctx.tidal_api.clone();
+	let api = &subsonic_ctx.tidal_api;
 	let mut track_id = None;
 
 	if let Some(id_str) = &query.id
@@ -574,9 +563,10 @@ pub async fn get_lyrics(
 		}
 	}
 
+	let q = query.into_inner();
 	let mut subsonic_lyrics = crate::api::subsonic::models::SubsonicLyrics {
-		artist: query.artist.clone(),
-		title: query.title.clone(),
+		artist: q.artist,
+		title: q.title,
 		value: "".to_string(),
 	};
 

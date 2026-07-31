@@ -145,7 +145,8 @@ async fn check_auth_status(
 	manager: web::Data<Arc<TidalClientManager>>,
 	store: web::Data<DeviceAuthStore>,
 ) -> impl Responder {
-	let session_id = match &query.session_id {
+	let q = query.into_inner();
+	let session_id = match q.session_id {
 		Some(id) => id,
 		None => {
 			return HttpResponse::Ok().json(serde_json::json!({
@@ -157,7 +158,7 @@ async fn check_auth_status(
 
 	let mut auth_attempt = {
 		let store_read = store.read().unwrap_or_else(|e| e.into_inner());
-		match store_read.get(session_id) {
+		match store_read.get(&session_id) {
 			Some(s) => s.clone(),
 			None => {
 				return HttpResponse::Ok().json(serde_json::json!({
@@ -173,7 +174,7 @@ async fn check_auth_status(
 		store
 			.write()
 			.unwrap_or_else(|e| e.into_inner())
-			.remove(session_id);
+			.remove(&session_id);
 		return HttpResponse::Ok().json(serde_json::json!({
 			"status": "expired",
 			"message": "Authorization session has expired. Please try again."
@@ -216,14 +217,12 @@ async fn check_auth_status(
 					store
 						.write()
 						.unwrap_or_else(|e| e.into_inner())
-						.insert(session_id.clone(), auth_attempt.clone());
+						.insert(session_id, auth_attempt);
 					return HttpResponse::Ok().json(serde_json::json!({
 						"status": "failed",
 						"error": "Failed to get user info after authorization"
 					}));
 				}
-
-				let mut display_name = user_id_str.clone();
 
 				let profile_res = temp_session
 					.request::<crate::tidal::models::UserProfile>(
@@ -235,15 +234,11 @@ async fn check_auth_status(
 					)
 					.await;
 
-				if let Ok(profile) = profile_res {
-					if let Some(uname) = profile.username {
-						display_name = uname;
-					} else if let Some(email) = profile.email {
-						display_name = email;
-					} else if let Some(fname) = profile.first_name {
-						display_name = fname;
-					}
-				}
+				let display_name_owned = match profile_res {
+					Ok(profile) => profile.username.or(profile.email).or(profile.first_name),
+					Err(_) => None,
+				};
+				let display_name = display_name_owned.as_deref().unwrap_or(&user_id_str);
 
 				let now_nanos = Utc::now().timestamp_nanos_opt().unwrap_or(0);
 				let session_uuid =
@@ -251,7 +246,7 @@ async fn check_auth_status(
 
 				if let Err(_e) = manager
 					.db
-					.save_web_session(&session_uuid, &user_id_str, &display_name)
+					.save_web_session(&session_uuid, &user_id_str, display_name)
 					.await
 				{
 					auth_attempt.status = "failed".to_string();
@@ -259,7 +254,7 @@ async fn check_auth_status(
 					store
 						.write()
 						.unwrap_or_else(|e| e.into_inner())
-						.insert(session_id.clone(), auth_attempt.clone());
+						.insert(session_id, auth_attempt);
 					return HttpResponse::Ok().json(serde_json::json!({
 						"status": "failed",
 						"error": "Failed to save web session"
@@ -270,7 +265,7 @@ async fn check_auth_status(
 				store
 					.write()
 					.unwrap_or_else(|e| e.into_inner())
-					.insert(session_id.clone(), auth_attempt.clone());
+					.insert(session_id, auth_attempt);
 
 				HttpResponse::Ok()
 					.cookie(
@@ -294,7 +289,7 @@ async fn check_auth_status(
 				store
 					.write()
 					.unwrap_or_else(|e| e.into_inner())
-					.insert(session_id.clone(), auth_attempt.clone());
+					.insert(session_id, auth_attempt);
 				HttpResponse::Ok().json(serde_json::json!({
 					"status": "failed",
 					"error": "Failed to get user info after authorization"
@@ -317,7 +312,7 @@ async fn check_auth_status(
 			store
 				.write()
 				.unwrap_or_else(|e| e.into_inner())
-				.insert(session_id.clone(), auth_attempt.clone());
+				.insert(session_id, auth_attempt);
 			HttpResponse::Ok().json(serde_json::json!({
 				"status": "failed",
 				"error": msg

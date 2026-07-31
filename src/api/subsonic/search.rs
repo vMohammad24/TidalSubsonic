@@ -35,7 +35,7 @@ async fn handle_search(
 	subsonic_ctx: actix_web::web::ReqData<crate::api::subsonic::middleware::SubsonicContext>,
 	version: u8,
 ) -> impl Responder {
-	let api = subsonic_ctx.tidal_api.clone();
+	let api = &subsonic_ctx.tidal_api;
 	let mut resp = SubsonicResponseWrapper::ok();
 	let song_limit = query.song_count.unwrap_or(20).clamp(0, 500) as usize;
 	let album_limit = query.album_count.unwrap_or(20).clamp(0, 500) as usize;
@@ -145,7 +145,7 @@ async fn handle_search(
 	} else {
 		let s = if song_limit > 0 {
 			let mut cached_tracks: Vec<_> = TRACK_CACHE.iter().collect();
-			cached_tracks.sort_by_key(|(k, _)| k.clone());
+			cached_tracks.sort_by_key(|(k, _)| **k);
 
 			cached_tracks
 				.into_iter()
@@ -166,7 +166,7 @@ async fn handle_search(
 
 		let b = if album_limit > 0 {
 			let mut cached_albums: Vec<_> = ALBUM_CACHE.iter().collect();
-			cached_albums.sort_by_key(|(k, _)| k.clone());
+			cached_albums.sort_by_key(|(k, _)| **k);
 
 			cached_albums
 				.into_iter()
@@ -186,7 +186,7 @@ async fn handle_search(
 
 		let r = if artist_limit > 0 {
 			let mut cached_artists: Vec<_> = ARTIST_CACHE.iter().collect();
-			cached_artists.sort_by_key(|(k, _)| k.clone());
+			cached_artists.sort_by_key(|(k, _)| **k);
 
 			cached_artists
 				.into_iter()

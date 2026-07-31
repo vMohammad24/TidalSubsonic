@@ -64,7 +64,7 @@ pub async fn scrobble(
 		Err(_) => return SubsonicResponder(SubsonicResponseWrapper::ok()),
 	};
 
-	let api = subsonic_ctx.tidal_api.clone();
+	let api = &subsonic_ctx.tidal_api;
 
 	let reqwest_client = http_client();
 	let url = "http://ws.audioscrobbler.com/2.0/";
@@ -131,10 +131,10 @@ pub async fn scrobble(
 					.record_scrobble(&subsonic_ctx.user, id_str, played_at, true)
 					.await;
 
-				params.push((format!("track[{}]", count), track.title.clone()));
-				params.push((format!("artist[{}]", count), track.artist.name.clone()));
+				params.push((format!("track[{}]", count), track.title));
+				params.push((format!("artist[{}]", count), track.artist.name));
 				params.push((format!("timestamp[{}]", count), timestamp.to_string()));
-				params.push((format!("album[{}]", count), track.album.title.clone()));
+				params.push((format!("album[{}]", count), track.album.title));
 				params.push((format!("duration[{}]", count), track.duration.to_string()));
 
 				count += 1;
@@ -142,7 +142,7 @@ pub async fn scrobble(
 		}
 
 		if count > 0 {
-			params.sort_by_key(|k| k.0.clone());
+			params.sort_by(|a, b| a.0.cmp(&b.0));
 			let mut sig_str = String::new();
 			for (k, v) in &params {
 				sig_str.push_str(k);
@@ -201,14 +201,16 @@ async fn save_play_queue_impl(
 	subsonic_ctx: actix_web::web::ReqData<crate::api::subsonic::middleware::SubsonicContext>,
 	db: web::Data<Arc<DbManager>>,
 ) -> impl Responder {
-	let track_ids = query.id.clone().unwrap_or_default();
+	let q = query.into_inner();
+	let track_ids = q.id.unwrap_or_default();
+	let current_track_id = q.current;
 
-	let position_ms = query.position;
+	let position_ms = q.position;
 	let updated_at = chrono::Utc::now();
 
 	let queue = DbPlayQueue {
-		username: subsonic_ctx.user.clone(),
-		current_track_id: query.current.clone(),
+		username: subsonic_ctx.into_inner().user,
+		current_track_id,
 		position_ms,
 		track_ids,
 		updated_at,
@@ -229,6 +231,7 @@ async fn get_play_queue_impl(
 	db: web::Data<Arc<DbManager>>,
 ) -> impl Responder {
 	let mut resp = SubsonicResponseWrapper::ok();
+	let username = subsonic_ctx.user.clone();
 
 	match db.get_play_queue(&subsonic_ctx.user).await {
 		Ok(Some(db_queue)) => {
@@ -236,14 +239,14 @@ async fn get_play_queue_impl(
 			let mut play_queue = PlayQueue {
 				current: db_queue.current_track_id,
 				position: db_queue.position_ms,
-				username: subsonic_ctx.user.clone(),
+				username,
 				changed,
 				changed_schema: db_queue.updated_at.timestamp_millis(),
 				entry: None,
 			};
 
 			if !db_queue.track_ids.is_empty() {
-				let api = subsonic_ctx.tidal_api.clone();
+				let api = &subsonic_ctx.tidal_api;
 				let mut songs = Vec::new();
 
 				for id_str in db_queue.track_ids.iter() {
@@ -269,7 +272,7 @@ async fn get_play_queue_impl(
 			resp.response.play_queue = Some(PlayQueue {
 				current: None,
 				position: None,
-				username: subsonic_ctx.user.clone(),
+				username,
 				changed,
 				changed_schema: 0,
 				entry: Some(Vec::new()),

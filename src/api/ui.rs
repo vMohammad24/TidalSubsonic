@@ -129,15 +129,16 @@ pub async fn home(
 		}
 	}
 
-	let status_message = if let Some(err) = &query.error {
-		Some(StatusMessage::Error(err.clone()))
-	} else if let Some(succ) = &query.success {
-		Some(StatusMessage::Success(succ.clone()))
-	} else if query.logged_out.is_some() {
+	let q = query.into_inner();
+	let status_message = if let Some(err) = q.error {
+		Some(StatusMessage::Error(err))
+	} else if let Some(succ) = q.success {
+		Some(StatusMessage::Success(succ))
+	} else if q.logged_out.is_some() {
 		Some(StatusMessage::Success(
 			"You have been logged out successfully.".to_string(),
 		))
-	} else if query.account_deleted.is_some() {
+	} else if q.account_deleted.is_some() {
 		Some(StatusMessage::Success(
 			"Your account has been deleted successfully.".to_string(),
 		))

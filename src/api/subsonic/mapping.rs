@@ -72,9 +72,9 @@ pub fn map_tidal_artist_to_subsonic(
 	artist.cache();
 	let cover_art = artist
 		.picture
-		.clone()
-		.or_else(|| artist.selected_album_cover_fallback.clone())
-		.unwrap_or_default();
+		.as_deref()
+		.or(artist.selected_album_cover_fallback.as_deref())
+		.unwrap_or("");
 
 	let artist_image_url = if !cover_art.is_empty() {
 		Some(format!(
@@ -100,7 +100,7 @@ pub fn map_tidal_artist_to_subsonic(
 	Artist {
 		id: artist.id.to_string(),
 		name: artist.name.clone(),
-		cover_art: cover_art.clone(),
+		cover_art: cover_art.to_string(),
 		album_count: ARTIST_ALBUM_COUNT_CACHE.get(&artist.id).unwrap_or(1),
 		album: None,
 		starred: starred.map(|d| format_date(Some(&d))),
@@ -117,16 +117,17 @@ pub fn map_tidal_album_to_subsonic(
 	album.cache();
 	let primary_artist_name = artists
 		.and_then(|a| a.first())
-		.map(|a| a.name.clone())
-		.or_else(|| album.artist.as_ref().map(|a| a.name.clone()))
+		.map(|a| a.name.as_str())
+		.or_else(|| album.artist.as_ref().map(|a| a.name.as_str()))
 		.or_else(|| {
 			album
 				.artists
 				.as_ref()
 				.and_then(|a| a.first())
-				.map(|a| a.name.clone())
+				.map(|a| a.name.as_str())
 		})
-		.unwrap_or_else(|| "Unknown Artist".to_string());
+		.unwrap_or("Unknown Artist")
+		.to_string();
 
 	let primary_artist_id = artists
 		.and_then(|a| a.first())
@@ -154,11 +155,13 @@ pub fn map_tidal_album_to_subsonic(
 		None
 	};
 
+	let album_title = album.title.clone();
+
 	Album {
 		id: album.id.to_string(),
 		is_dir: true,
-		name: album.title.clone(),
-		title: Some(album.title.clone()),
+		name: album_title.clone(),
+		title: Some(album_title),
 		artist: primary_artist_name,
 		artist_id: primary_artist_id.unwrap_or_default(),
 		cover_art: cover_art_id,
@@ -203,14 +206,14 @@ pub fn map_tidal_track_to_subsonic(
 
 	let date_value = track
 		.release_date
-		.clone()
-		.or_else(|| track.stream_start_date.clone());
+		.as_deref()
+		.or(track.stream_start_date.as_deref());
 
-	let year = extract_year(date_value.as_deref())
-		.or_else(|| extract_year(resolved_album.release_date.as_deref()));
+	let year =
+		extract_year(date_value).or_else(|| extract_year(resolved_album.release_date.as_deref()));
 
-	let created_str = date_value.or_else(|| resolved_album.release_date.clone());
-	let created = format_date(created_str.as_deref());
+	let created_str = date_value.or(resolved_album.release_date.as_deref());
+	let created = format_date(created_str);
 
 	let bit_rate = match track.audio_quality.as_deref() {
 		Some("LOW") => 96,
@@ -227,12 +230,14 @@ pub fn map_tidal_track_to_subsonic(
 		.map(|tags| {
 			tags.iter()
 				.map(|t| {
-					let tag = t.replace('_', " ");
-					let words = tag.split_whitespace().peekable();
-					if words.clone().nth(1).is_some() {
-						words.filter_map(|w| w.chars().next()).collect()
-					} else {
-						t.chars().take(2).collect()
+					let tag_clean = t.replace('_', " ");
+					let mut words = tag_clean.split_whitespace();
+					match (words.next(), words.next()) {
+						(Some(_), Some(_)) => tag_clean
+							.split_whitespace()
+							.filter_map(|w| w.chars().next())
+							.collect(),
+						_ => t.chars().take(2).collect(),
 					}
 				})
 				.collect::<Vec<String>>()
@@ -301,9 +306,10 @@ pub fn map_tidal_playlist_to_subsonic(
 		owner: playlist
 			.creator
 			.as_ref()
-			.and_then(|c| c.name.clone())
-			.or_else(|| owner_name.map(|s| s.to_string()))
-			.or_else(|| Some("Unknown".to_string())),
+			.and_then(|c| c.name.as_deref())
+			.or(owner_name)
+			.or(Some("Unknown"))
+			.map(|s| s.to_string()),
 		public: Some(false),
 		song_count: playlist.number_of_tracks,
 		duration: playlist.duration,
@@ -312,10 +318,11 @@ pub fn map_tidal_playlist_to_subsonic(
 		cover_art: Some(
 			playlist
 				.custom_image_url
-				.clone()
-				.or_else(|| playlist.square_image.clone())
-				.or_else(|| playlist.image.clone())
-				.unwrap_or_default(),
+				.as_deref()
+				.or(playlist.square_image.as_deref())
+				.or(playlist.image.as_deref())
+				.unwrap_or_default()
+				.to_string(),
 		),
 		comment: playlist.description.clone(),
 		entry: None,
