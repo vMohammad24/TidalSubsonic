@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT\n                u.username,\n                u.tidal_user_id,\n                u.use_playlists as \"use_playlists!\",\n                u.use_favorites as \"use_favorites!\",\n                l.lastfm_username\n             FROM subsonic_users u\n             LEFT JOIN user_lastfm_links l ON u.username = l.subsonic_username\n             WHERE u.tidal_user_id = $1",
+  "query": "SELECT\n                u.username,\n                u.tidal_user_id,\n                u.use_playlists as \"use_playlists!\",\n                u.use_favorites as \"use_favorites!\",\n                u.use_event_batch as \"use_event_batch!\",\n                l.lastfm_username\n             FROM subsonic_users u\n             LEFT JOIN user_lastfm_links l ON u.username = l.subsonic_username\n             WHERE u.tidal_user_id = $1",
   "describe": {
     "columns": [
       {
@@ -49,6 +49,17 @@
       },
       {
         "ordinal": 4,
+        "name": "use_event_batch!",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "subsonic_users",
+            "name": "use_event_batch"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
         "name": "lastfm_username",
         "type_info": "Varchar",
         "origin": {
@@ -69,8 +80,9 @@
       false,
       true,
       true,
+      true,
       true
     ]
   },
-  "hash": "2a7d882afb0a10e325a9a181d04b5f33d6eb2f872b80b0365ac41611c1994f46"
+  "hash": "6bcefa558d133426996d7d0433f44f809a53962a7fe5df95b5307dd15a085f00"
 }

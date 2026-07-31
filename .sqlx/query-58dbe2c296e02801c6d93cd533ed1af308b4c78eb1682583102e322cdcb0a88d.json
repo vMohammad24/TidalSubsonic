@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT\n                tidal_user_id,\n                COALESCE(password, '') as \"password!\",\n                use_playlists as \"use_playlists!\",\n                use_favorites as \"use_favorites!\"\n            FROM subsonic_users WHERE username = $1",
+  "query": "SELECT\n                tidal_user_id,\n                COALESCE(password, '') as \"password!\",\n                use_playlists as \"use_playlists!\",\n                use_favorites as \"use_favorites!\",\n                use_event_batch as \"use_event_batch!\"\n            FROM subsonic_users WHERE username = $1",
   "describe": {
     "columns": [
       {
@@ -41,6 +41,17 @@
             "name": "use_favorites"
           }
         }
+      },
+      {
+        "ordinal": 4,
+        "name": "use_event_batch!",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "subsonic_users",
+            "name": "use_event_batch"
+          }
+        }
       }
     ],
     "parameters": {
@@ -52,8 +63,9 @@
       false,
       null,
       true,
+      true,
       true
     ]
   },
-  "hash": "77e692f6bef03e12927a8293d052b19803f2aaa41d466d857b58e58777b31cb8"
+  "hash": "58dbe2c296e02801c6d93cd533ed1af308b4c78eb1682583102e322cdcb0a88d"
 }
