@@ -4,6 +4,7 @@ use crate::db::{DbManager, PlayQueue as DbPlayQueue};
 use crate::util::http_client;
 use actix_web::{Responder, web};
 use serde::Deserialize;
+use serde_qs::actix::QsQuery;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -174,13 +175,14 @@ pub async fn get_queue(
 
 #[derive(Deserialize)]
 pub struct SavePlayQueueQuery {
-	pub id: Option<Vec<String>>,
+	#[serde(default)]
+	pub id: Vec<String>,
 	pub current: Option<String>,
-	pub position: Option<i64>,
+	pub position: Option<f64>,
 }
 
 pub async fn save_queue(
-	query: web::Query<SavePlayQueueQuery>,
+	query: QsQuery<SavePlayQueueQuery>,
 	subsonic_ctx: actix_web::web::ReqData<crate::api::subsonic::middleware::SubsonicContext>,
 	db: web::Data<Arc<DbManager>>,
 ) -> impl Responder {
@@ -195,7 +197,7 @@ pub async fn get_play_queue(
 }
 
 pub async fn save_play_queue(
-	query: web::Query<SavePlayQueueQuery>,
+	query: QsQuery<SavePlayQueueQuery>,
 	subsonic_ctx: actix_web::web::ReqData<crate::api::subsonic::middleware::SubsonicContext>,
 	db: web::Data<Arc<DbManager>>,
 ) -> impl Responder {
@@ -203,15 +205,14 @@ pub async fn save_play_queue(
 }
 
 async fn save_play_queue_impl(
-	query: web::Query<SavePlayQueueQuery>,
+	query: QsQuery<SavePlayQueueQuery>,
 	subsonic_ctx: actix_web::web::ReqData<crate::api::subsonic::middleware::SubsonicContext>,
 	db: web::Data<Arc<DbManager>>,
 ) -> impl Responder {
 	let q = query.into_inner();
-	let track_ids = q.id.unwrap_or_default();
+	let track_ids = q.id;
 	let current_track_id = q.current;
-
-	let position_ms = q.position;
+	let position_ms = q.position.map(|p| p.round() as i64);
 	let updated_at = chrono::Utc::now();
 
 	let queue = DbPlayQueue {
