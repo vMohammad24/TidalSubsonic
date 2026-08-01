@@ -50,11 +50,9 @@
           SQLX_OFFLINE = "true";
 
           nativeBuildInputs = [pkgs.pkg-config];
-          buildInputs =
-            [pkgs.openssl]
-            ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
-              pkgs.darwin.apple_sdk.frameworks.Security
-            ];
+          buildInputs = pkgs.lib.optionals pkgs.stdenv.isDarwin [
+            pkgs.darwin.apple_sdk.frameworks.Security
+          ];
         };
 
         cargoArtifacts = craneLib.buildDepsOnly commonArgs;
@@ -68,18 +66,24 @@
         packages = {
           default = app;
 
-          container = pkgs.dockerTools.buildImage {
+          container = pkgs.dockerTools.buildLayeredImage {
             name = "tss";
             tag = "latest";
-            copyToRoot = [
+            contents = [
               app
               pkgs.cacert
               pkgs.tzdata
-              pkgs.curl
+              pkgs.busybox
+              pkgs.dockerTools.fakeNss
             ];
             config = {
               Cmd = ["${app}/bin/tss"];
-              Env = ["RUST_LOG=info"];
+              Env = [
+                "RUST_LOG=info"
+                "HOST=0.0.0.0"
+                "PORT=3000"
+              ];
+              User = "nobody:nobody";
               ExposedPorts = {"3000/tcp" = {};};
             };
           };
@@ -104,14 +108,36 @@
         pkgs,
         ...
       }:
-        with lib; {
+        with lib; let
+          cfg = config.services.tss;
+        in {
           options.services.tss = {
             enable = mkEnableOption "Tidal SubSonic API layer";
+
+            package = mkOption {
+              type = types.package;
+              default = self.packages.${pkgs.stdenv.hostPlatform.system}.default;
+              defaultText =
+                lib.literalExpression "self.packages.${pkgs.stdenv.hostPlatform.system}.default";
+              description = "The TSS package to run.";
+            };
+
+            host = mkOption {
+              type = types.str;
+              default = "127.0.0.1";
+              description = "The address TSS should bind to.";
+            };
 
             port = mkOption {
               type = types.port;
               default = 3000;
               description = "The port the TSS service should listen on.";
+            };
+
+            logLevel = mkOption {
+              type = types.enum ["trace" "debug" "info" "warn" "error"];
+              default = "info";
+              description = "RUST_LOG level for the service.";
             };
 
             envFile = mkOption {
@@ -124,21 +150,50 @@
             };
           };
 
-          config = mkIf config.services.tss.enable {
+          config = mkIf cfg.enable {
             systemd.services.tss = {
-              description = "TSS Service";
+              description = "Tidal SubSonic service";
               wantedBy = ["multi-user.target"];
-              after = ["network.target"];
+              wants = ["network-online.target"];
+              after = ["network-online.target"];
+
               serviceConfig = {
-                ExecStart = "${self.packages.${pkgs.stdenv.hostPlatform.system}.default}/bin/tss";
+                Type = "simple";
+                ExecStart = "${cfg.package}/bin/tss";
                 Restart = "always";
+                RestartSec = "5s";
+
                 DynamicUser = true;
+                RuntimeDirectory = "tss";
+                StateDirectory = "tss";
 
                 Environment = [
-                  "PORT=${toString config.services.tss.port}"
+                  "HOST=${cfg.host}"
+                  "PORT=${toString cfg.port}"
+                  "RUST_LOG=${cfg.logLevel}"
+                  "HOME=/run/tss"
                 ];
 
-                EnvironmentFile = mkIf (config.services.tss.envFile != null) config.services.tss.envFile;
+                EnvironmentFile = mkIf (cfg.envFile != null) cfg.envFile;
+                NoNewPrivileges = true;
+                PrivateTmp = true;
+                PrivateDevices = true;
+                ProtectSystem = "strict";
+                ProtectHome = true;
+                ProtectKernelTunables = true;
+                ProtectKernelModules = true;
+                ProtectKernelLogs = true;
+                ProtectClock = true;
+                ProtectControlGroups = true;
+                RestrictRealtime = true;
+                RestrictNamespaces = true;
+                RestrictAddressFamilies = ["AF_INET" "AF_INET6" "AF_UNIX"];
+                LockPersonality = true;
+                MemoryDenyWriteExecute = true;
+                CapabilityBoundingSet = [];
+                SystemCallArchitectures = "native";
+                UMask = "0077";
+                RemoveIPC = true;
               };
             };
           };
