@@ -208,40 +208,52 @@ impl TidalApi {
 		}
 	}
 
-	pub async fn get_album(&self, album_id: i64) -> Result<Album, TidalError> {
-		if let Some(album) = ALBUM_CACHE.get(&album_id).await {
-			return Ok(album);
+	async fn get_cached_entity<T, F, Fut>(
+		cache: &moka::future::Cache<i64, T>,
+		id: i64,
+		fetch: F,
+	) -> Result<T, TidalError>
+	where
+		T: Clone + Send + Sync + 'static,
+		F: FnOnce() -> Fut,
+		Fut: std::future::Future<Output = Result<T, TidalError>>,
+	{
+		if let Some(entity) = cache.get(&id).await {
+			return Ok(entity);
 		}
-		let album = self
-			.session
-			.request::<Album>(
-				Method::GET,
-				&format!("/albums/{}", album_id),
-				None,
-				None,
-				crate::tidal::session::ApiVersion::V1,
-			)
-			.await?;
-		ALBUM_CACHE.insert(album_id, album.clone()).await;
-		Ok(album)
+		let entity = fetch().await?;
+		cache.insert(id, entity.clone()).await;
+		Ok(entity)
+	}
+
+	pub async fn get_album(&self, album_id: i64) -> Result<Album, TidalError> {
+		Self::get_cached_entity(&ALBUM_CACHE, album_id, || async {
+			self.session
+				.request::<Album>(
+					Method::GET,
+					&format!("/albums/{}", album_id),
+					None,
+					None,
+					crate::tidal::session::ApiVersion::V1,
+				)
+				.await
+		})
+		.await
 	}
 
 	pub async fn get_track(&self, track_id: i64) -> Result<Track, TidalError> {
-		if let Some(track) = TRACK_CACHE.get(&track_id).await {
-			return Ok(track);
-		}
-		let track = self
-			.session
-			.request::<Track>(
-				Method::GET,
-				&format!("/tracks/{}", track_id),
-				None,
-				None,
-				crate::tidal::session::ApiVersion::V1,
-			)
-			.await?;
-		TRACK_CACHE.insert(track_id, track.clone()).await;
-		Ok(track)
+		Self::get_cached_entity(&TRACK_CACHE, track_id, || async {
+			self.session
+				.request::<Track>(
+					Method::GET,
+					&format!("/tracks/{}", track_id),
+					None,
+					None,
+					crate::tidal::session::ApiVersion::V1,
+				)
+				.await
+		})
+		.await
 	}
 
 	pub async fn get_track_recommendations(
@@ -273,21 +285,18 @@ impl TidalApi {
 	}
 
 	pub async fn get_artist(&self, artist_id: i64) -> Result<Artist, TidalError> {
-		if let Some(artist) = ARTIST_CACHE.get(&artist_id).await {
-			return Ok(artist);
-		}
-		let artist = self
-			.session
-			.request::<Artist>(
-				Method::GET,
-				&format!("/artists/{}", artist_id),
-				None,
-				None,
-				ApiVersion::V1,
-			)
-			.await?;
-		ARTIST_CACHE.insert(artist_id, artist.clone()).await;
-		Ok(artist)
+		Self::get_cached_entity(&ARTIST_CACHE, artist_id, || async {
+			self.session
+				.request::<Artist>(
+					Method::GET,
+					&format!("/artists/{}", artist_id),
+					None,
+					None,
+					ApiVersion::V1,
+				)
+				.await
+		})
+		.await
 	}
 
 	pub async fn get_artist_bio(
@@ -848,14 +857,15 @@ impl TidalApi {
 	}
 
 	pub async fn add_favorite_album(&self, album_id: i64) -> Result<(), TidalError> {
+		let user_id = self.user_id().ok_or_else(|| {
+			TidalError::Authentication("User ID required for favorite operations".into())
+		})?;
 		let body = [("albumIds", album_id.to_string())];
-		if let Some(user_id) = self.user_id() {
-			add_favorite(user_id, album_id, Utc::now().to_rfc3339());
-		}
+		add_favorite(user_id, album_id, Utc::now().to_rfc3339());
 		self.session
 			.request::<()>(
 				reqwest::Method::POST,
-				&format!("/users/{}/favorites/albums", self.user_id().unwrap_or(0)),
+				&format!("/users/{}/favorites/albums", user_id),
 				None,
 				Some(&body),
 				crate::tidal::session::ApiVersion::V1,
@@ -865,17 +875,14 @@ impl TidalApi {
 	}
 
 	pub async fn remove_favorite_album(&self, album_id: i64) -> Result<(), TidalError> {
-		if let Some(user_id) = self.user_id() {
-			remove_favorite(user_id, album_id);
-		}
+		let user_id = self.user_id().ok_or_else(|| {
+			TidalError::Authentication("User ID required for favorite operations".into())
+		})?;
+		remove_favorite(user_id, album_id);
 		self.session
 			.request::<()>(
 				reqwest::Method::DELETE,
-				&format!(
-					"/users/{}/favorites/albums/{}",
-					self.user_id().unwrap_or(0),
-					album_id
-				),
+				&format!("/users/{}/favorites/albums/{}", user_id, album_id),
 				None,
 				None,
 				crate::tidal::session::ApiVersion::V1,
@@ -885,15 +892,15 @@ impl TidalApi {
 	}
 
 	pub async fn add_favorite_artist(&self, artist_id: i64) -> Result<(), TidalError> {
+		let user_id = self.user_id().ok_or_else(|| {
+			TidalError::Authentication("User ID required for favorite operations".into())
+		})?;
 		let body = [("artistIds", artist_id.to_string())];
-
-		if let Some(user_id) = self.user_id() {
-			add_favorite(user_id, artist_id, Utc::now().to_rfc3339());
-		}
+		add_favorite(user_id, artist_id, Utc::now().to_rfc3339());
 		self.session
 			.request::<()>(
 				reqwest::Method::POST,
-				&format!("/users/{}/favorites/artists", self.user_id().unwrap_or(0)),
+				&format!("/users/{}/favorites/artists", user_id),
 				None,
 				Some(&body),
 				crate::tidal::session::ApiVersion::V1,
@@ -903,17 +910,14 @@ impl TidalApi {
 	}
 
 	pub async fn remove_favorite_artist(&self, artist_id: i64) -> Result<(), TidalError> {
-		if let Some(user_id) = self.user_id() {
-			remove_favorite(user_id, artist_id);
-		}
+		let user_id = self.user_id().ok_or_else(|| {
+			TidalError::Authentication("User ID required for favorite operations".into())
+		})?;
+		remove_favorite(user_id, artist_id);
 		self.session
 			.request::<()>(
 				reqwest::Method::DELETE,
-				&format!(
-					"/users/{}/favorites/artists/{}",
-					self.user_id().unwrap_or(0),
-					artist_id
-				),
+				&format!("/users/{}/favorites/artists/{}", user_id, artist_id),
 				None,
 				None,
 				crate::tidal::session::ApiVersion::V1,
