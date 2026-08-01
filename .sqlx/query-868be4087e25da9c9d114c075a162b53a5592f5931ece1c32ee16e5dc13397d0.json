@@ -1,0 +1,83 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n\t\tSELECT \n\t\t\tu.username,\n\t\t\tu.use_playlists as \"use_playlists!\",\n\t\t\tu.use_favorites as \"use_favorites!\",\n\t\t\tu.use_event_batch as \"use_event_batch!\",\n\t\t\tl.lastfm_username,\n\t\t\tCOALESCE(s.scrobble_count, 0) as \"scrobbles!\"\n\t\tFROM subsonic_users u\n\t\tLEFT JOIN user_lastfm_links l ON u.username = l.subsonic_username\n\t\tLEFT JOIN (\n\t\t\tSELECT username, COUNT(*) as scrobble_count\n\t\t\tFROM scrobbles\n\t\t\tWHERE submission = true\n\t\t\tGROUP BY username\n\t\t) s ON u.username = s.username\n\t\tWHERE u.tidal_user_id = $1\n\t\t",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "username",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "subsonic_users",
+            "name": "username"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "use_playlists!",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "subsonic_users",
+            "name": "use_playlists"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "use_favorites!",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "subsonic_users",
+            "name": "use_favorites"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "use_event_batch!",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "subsonic_users",
+            "name": "use_event_batch"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "lastfm_username",
+        "type_info": "Varchar",
+        "origin": {
+          "Table": {
+            "table": "user_lastfm_links",
+            "name": "lastfm_username"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "scrobbles!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      true,
+      null
+    ]
+  },
+  "hash": "868be4087e25da9c9d114c075a162b53a5592f5931ece1c32ee16e5dc13397d0"
+}
