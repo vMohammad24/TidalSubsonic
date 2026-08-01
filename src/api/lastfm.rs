@@ -249,50 +249,27 @@ struct LinkQuery {
 	username: Option<String>,
 }
 
-async fn link(
-	query: web::Query<LinkQuery>,
-	req: HttpRequest,
-	store: web::Data<TokenStore>,
-	manager: web::Data<Arc<TidalClientManager>>,
-) -> impl Responder {
-	let Some(tidal_user_id) = extract_user_id(&req, &manager).await else {
-		return HttpResponse::Unauthorized().json(serde_json::json!({
-			"error": "Unauthorized"
-		}));
-	};
-
-	let q = query.into_inner();
-	let Some(username) = q.username else {
-		return HttpResponse::BadRequest().json(serde_json::json!({
-			"error": "Missing username parameter"
-		}));
-	};
-
-	let user_details = manager.db.get_user_details(&username).await;
-	let (user_tidal_id, _, _, _, _) = match user_details {
-		Ok(Some(d)) => d,
-		_ => {
-			return HttpResponse::Forbidden().json(serde_json::json!({
-				"error": "User not found or does not belong to this Tidal account"
-			}));
-		}
-	};
-
-	if user_tidal_id != tidal_user_id {
-		return HttpResponse::Forbidden().json(serde_json::json!({
-			"error": "User not found or does not belong to this Tidal account"
-		}));
+async fn initiate_lastfm_auth(
+	username: &str,
+	tidal_user_id: &str,
+	req: &HttpRequest,
+	manager: &TidalClientManager,
+	store: &TokenStore,
+) -> Result<String, &'static str> {
+	if !manager
+		.db
+		.verify_user_ownership(username, tidal_user_id)
+		.await
+		.unwrap_or(false)
+	{
+		return Err("User not found or does not belong to this Tidal account");
 	}
 
 	let Ok(lastfm_api_key) = std::env::var("LASTFM_API_KEY") else {
-		tracing::error!("LASTFM_API_KEY environment variable is not set");
-		return HttpResponse::InternalServerError().json(serde_json::json!({
-			"error": "Last.fm integration is not configured on the server."
-		}));
+		return Err("Last.fm integration is not configured on the server.");
 	};
 
 	let now_ms = chrono::Utc::now().timestamp_millis() as u64;
-
 	let state = now_ms.to_string();
 	let origin = format!(
 		"{}://{}",
@@ -318,21 +295,44 @@ async fn link(
 		store_write.insert(
 			state,
 			TokenState {
-				username,
+				username: username.to_string(),
 				expiration_time,
 			},
 		);
+		Ok(auth_url)
 	} else {
-		tracing::error!("Failed to acquire write lock for TokenStore");
-		return HttpResponse::InternalServerError().json(serde_json::json!({
-			"error": "Internal server error"
-		}));
+		Err("Failed to acquire write lock for TokenStore")
 	}
+}
 
-	HttpResponse::Ok().json(serde_json::json!({
-		"link": auth_url,
-		"instructions": "Visit the link to authenticate with Last.fm and link your account."
-	}))
+async fn link(
+	query: web::Query<LinkQuery>,
+	req: HttpRequest,
+	store: web::Data<TokenStore>,
+	manager: web::Data<TidalClientManager>,
+) -> impl Responder {
+	let Some(tidal_user_id) = extract_user_id(&req, &manager).await else {
+		return HttpResponse::Unauthorized().json(serde_json::json!({
+			"error": "Unauthorized"
+		}));
+	};
+
+	let q = query.into_inner();
+	let Some(username) = q.username else {
+		return HttpResponse::BadRequest().json(serde_json::json!({
+			"error": "Missing username parameter"
+		}));
+	};
+
+	match initiate_lastfm_auth(&username, &tidal_user_id, &req, &manager, &store).await {
+		Ok(auth_url) => HttpResponse::Ok().json(serde_json::json!({
+			"link": auth_url,
+			"instructions": "Visit the link to authenticate with Last.fm and link your account."
+		})),
+		Err(err_msg) => HttpResponse::Forbidden().json(serde_json::json!({
+			"error": err_msg
+		})),
+	}
 }
 
 #[derive(Deserialize)]
@@ -468,62 +468,16 @@ async fn link_form(
 			.finish();
 	};
 
-	let user_details = manager.db.get_user_details(&form.username).await;
-	let (user_tidal_id, _, _, _, _) = match user_details {
-		Ok(Some(d)) => d,
-		_ => {
-			set_flash(&session, "error", "User not found");
-			return HttpResponse::SeeOther()
-				.append_header(("Location", "/"))
-				.finish();
-		}
-	};
-
-	if user_tidal_id != tidal_user_id {
-		set_flash(&session, "error", "User not found");
-		return HttpResponse::SeeOther()
-			.append_header(("Location", "/"))
-			.finish();
-	}
-
-	let Ok(lastfm_api_key) = std::env::var("LASTFM_API_KEY") else {
-		set_flash(&session, "error", "Last.fm integration is not configured");
-		return HttpResponse::SeeOther()
-			.append_header(("Location", "/"))
-			.finish();
-	};
-
-	let now_ms = chrono::Utc::now().timestamp_millis() as u64;
-	let state = now_ms.to_string();
-	let origin = format!(
-		"{}://{}",
-		req.connection_info().scheme(),
-		req.connection_info().host()
-	);
-
-	let callback_url = format!(
-		"{}/lastfm/callback?state={}",
-		origin,
-		urlencoding::encode(&state)
-	);
-	let auth_url = format!(
-		"https://www.last.fm/api/auth/?api_key={}&cb={}",
-		lastfm_api_key,
-		urlencoding::encode(&callback_url)
-	);
-
-	let expiration_time = now_ms + 10 * 60 * 1000;
-
-	if let Ok(mut store_write) = store.write() {
-		store_write.retain(|_, v| v.expiration_time >= now_ms);
-		store_write.insert(
-			state,
-			TokenState {
-				username: form.username,
-				expiration_time,
-			},
-		);
-	}
+	let auth_url =
+		match initiate_lastfm_auth(&form.username, &tidal_user_id, &req, &manager, &store).await {
+			Ok(url) => url,
+			Err(err_msg) => {
+				set_flash(&session, "error", err_msg);
+				return HttpResponse::SeeOther()
+					.append_header(("Location", "/"))
+					.finish();
+			}
+		};
 
 	if req.headers().contains_key("HX-Request") {
 		return HttpResponse::Ok()
