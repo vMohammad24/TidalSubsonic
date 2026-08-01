@@ -1,9 +1,8 @@
 use crate::db::DbManager;
 use actix_web::{HttpResponse, Responder, web};
 use serde_json::json;
-use std::sync::Arc;
 
-pub async fn health_check(db: web::Data<Arc<DbManager>>) -> impl Responder {
+pub async fn health_check(db: web::Data<DbManager>) -> impl Responder {
 	match sqlx::query("SELECT 1").execute(&db.pool).await {
 		Ok(_) => HttpResponse::Ok().json(json!({
 			"status": "healthy",
