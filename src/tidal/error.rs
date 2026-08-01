@@ -1,3 +1,4 @@
+use actix_web::{HttpResponse, ResponseError, http::StatusCode};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -10,6 +11,7 @@ pub enum TidalError {
 
 	#[error("API rate limit exceeded")]
 	RateLimit,
+
 	#[error("Payment required to access this content")]
 	PaymentRequired,
 
@@ -24,4 +26,25 @@ pub enum TidalError {
 
 	#[error("An unexpected error occurred: {0}")]
 	Unexpected(String),
+}
+
+impl ResponseError for TidalError {
+	fn status_code(&self) -> StatusCode {
+		match self {
+			TidalError::Authentication(_) => StatusCode::UNAUTHORIZED,
+			TidalError::ResourceNotFound(_, _) => StatusCode::NOT_FOUND,
+			TidalError::RateLimit => StatusCode::TOO_MANY_REQUESTS,
+			TidalError::PaymentRequired => StatusCode::PAYMENT_REQUIRED,
+			TidalError::ApiError(code, _) => {
+				StatusCode::from_u16(*code).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR)
+			}
+			_ => StatusCode::INTERNAL_SERVER_ERROR,
+		}
+	}
+
+	fn error_response(&self) -> HttpResponse {
+		HttpResponse::build(self.status_code()).json(serde_json::json!({
+			"error": self.to_string()
+		}))
+	}
 }
