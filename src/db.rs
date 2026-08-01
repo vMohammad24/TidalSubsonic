@@ -207,6 +207,15 @@ impl DbManager {
 		}))
 	}
 
+	pub async fn verify_user_ownership(
+		&self,
+		subsonic_username: &str,
+		tidal_user_id: &str,
+	) -> Result<bool, sqlx::Error> {
+		let details = self.get_user_details(subsonic_username).await?;
+		Ok(details.is_some_and(|(owner_id, _, _, _, _)| owner_id == tidal_user_id))
+	}
+
 	pub async fn link_lastfm_account(
 		&self,
 		subsonic_username: &str,
@@ -222,20 +231,6 @@ impl DbManager {
         .execute(&self.pool)
         .await?;
 		Ok(())
-	}
-
-	pub async fn get_scrobble_count(
-		&self,
-		subsonic_username: &str,
-	) -> Result<Option<i64>, sqlx::Error> {
-		let count = sqlx::query_scalar!(
-			"SELECT COUNT(*) FROM scrobbles WHERE username = $1 AND submission = true",
-			subsonic_username
-		)
-		.fetch_optional(&self.pool)
-		.await?;
-
-		Ok(count.flatten())
 	}
 
 	pub async fn get_lastfm_details(
@@ -498,6 +493,10 @@ impl DbManager {
 		playlist_id: Uuid,
 		track_ids: &[String],
 	) -> Result<(), sqlx::Error> {
+		if track_ids.is_empty() {
+			return Ok(());
+		}
+
 		let mut tx = self.pool.begin().await?;
 
 		sqlx::query!(
@@ -515,16 +514,18 @@ impl DbManager {
 		.await?
 		.unwrap_or(-1);
 
-		for (i, track_id) in track_ids.iter().enumerate() {
-			sqlx::query!(
-				"INSERT INTO local_playlist_tracks (playlist_id, track_id, position) VALUES ($1, $2, $3)",
-				playlist_id,
-				track_id,
-				max_pos + 1 + i as i32
-			)
-			.execute(&mut *tx)
-			.await?;
-		}
+		let mut builder = sqlx::QueryBuilder::new(
+			"INSERT INTO local_playlist_tracks (playlist_id, track_id, position) ",
+		);
+
+		builder.push_values(track_ids.iter().enumerate(), |mut b, (i, track_id)| {
+			b.push_bind(playlist_id)
+				.push_bind(track_id)
+				.push_bind(max_pos + 1 + i as i32);
+		});
+
+		let query = builder.build();
+		query.execute(&mut *tx).await?;
 
 		tx.commit().await?;
 		Ok(())
