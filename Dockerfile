@@ -1,31 +1,39 @@
-FROM rust:1.97-slim-bookworm AS build
+FROM lukemathwalker/cargo-chef:latest-rust-1-alpine AS chef
+RUN apk add --no-cache musl-dev build-base cmake ninja
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
+FROM chef AS planner
+COPY . .
+RUN cargo chef prepare --recipe-path recipe.json
 
-COPY Cargo.toml Cargo.lock ./
-COPY .sqlx ./.sqlx
-COPY src ./src
-COPY migrations ./migrations
-COPY templates ./templates
-ENV SQLX_OFFLINE=true
-RUN cargo build --release
+FROM chef AS builder
+COPY --from=planner /app/recipe.json recipe.json
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    cargo chef cook --release --target x86_64-unknown-linux-musl --recipe-path recipe.json
+COPY . .
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    cargo build --release --target x86_64-unknown-linux-musl --bin tss && \
+    cp /app/target/x86_64-unknown-linux-musl/release/tss /app/tss
 
-FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates tzdata \
-    libssl3 curl \
-  && rm -rf /var/lib/apt/lists/*
+FROM alpine:3.24 AS runtime
+RUN apk add --no-cache ca-certificates \
+    && adduser -S -D -H -s /sbin/nologin appuser
+WORKDIR /app
 
-RUN useradd -m -U -s /usr/sbin/nologin appuser
-WORKDIR /home/appuser
+COPY --from=builder /app/tss /app/tss
+COPY --from=builder /app/migrations /app/migrations
+COPY --from=builder /app/templates /app/templates
 
-COPY --from=build /app/target/release/tss /usr/local/bin/tss
-
-ENV RUST_LOG=info
+ENV HOME=/tmp
 USER appuser
 
-
+ENV HOST=0.0.0.0
+ENV PORT=3000
 EXPOSE 3000
-CMD ["/usr/local/bin/tss"]
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=20s --retries=3 \
+    CMD wget -q -O /dev/null "http://127.0.0.1:${PORT}/health" || exit 1
+
+ENTRYPOINT ["/app/tss"]
