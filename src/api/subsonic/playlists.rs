@@ -273,28 +273,19 @@ pub async fn get_playlist(
 				let ctx = &*subsonic_ctx;
 				let cover = detail.cover_art;
 
-				let songs: Vec<_> = futures_util::stream::iter(detail.track_ids)
-					.map(|track_id| async move {
-						match track_id.parse::<i64>() {
-							Ok(track_id_i64) => match api.get_track(track_id_i64).await {
-								Ok(track) => {
-									Some(map_tidal_track_to_subsonic(&track, Some(ctx), None, None))
-								}
-								Err(e) => {
-									tracing::warn!(track_id = %track_id_i64, error = ?e, "Failed to fetch track for mix playlist");
-									None
-								}
-							},
-							Err(e) => {
-								tracing::error!(track_id = %track_id, error = ?e, "Failed to parse mix track ID");
-								None
-							}
-						}
-					})
-					.buffered(50)
-					.filter_map(std::future::ready)
-					.collect()
-					.await;
+				let songs = crate::util::fetch_concurrently(detail.track_ids, 50, |track_id| async move {
+					let track_id_i64 = track_id
+						.parse::<i64>()
+						.map_err(|e| tracing::error!(track_id = %track_id, error = ?e, "Failed to parse mix track ID"))
+						.ok()?;
+					let track = api
+						.get_track(track_id_i64)
+						.await
+						.map_err(|e| tracing::warn!(track_id = %track_id_i64, error = ?e, "Failed to fetch track for mix playlist"))
+						.ok()?;
+					Some(map_tidal_track_to_subsonic(&track, Some(ctx), None, None))
+				})
+				.await;
 
 				let sub_playlist = SubsonicPlaylist {
 					id: playlist_id,
@@ -336,28 +327,19 @@ pub async fn get_playlist(
 			if let Ok(track_ids) = db.get_local_playlist_tracks(id).await {
 				let ctx = &*subsonic_ctx;
 
-				let songs: Vec<_> = futures_util::stream::iter(track_ids)
-					.map(|track_id| async move {
-						match track_id.parse::<i64>() {
-							Ok(track_id_i64) => match api.get_track(track_id_i64).await {
-								Ok(track) => {
-									Some(map_tidal_track_to_subsonic(&track, Some(ctx), None, None))
-								}
-								Err(e) => {
-									tracing::warn!(track_id = %track_id_i64, error = ?e, "Failed to fetch track for playlist");
-									None
-								}
-							},
-							Err(e) => {
-								tracing::error!(track_id = %track_id, error = ?e, "Failed to parse track ID");
-								None
-							}
-						}
-					})
-					.buffered(50)
-					.filter_map(std::future::ready)
-					.collect()
-					.await;
+				let songs = crate::util::fetch_concurrently(track_ids, 50, |track_id| async move {
+					let track_id_i64 = track_id
+						.parse::<i64>()
+						.map_err(|e| tracing::error!(track_id = %track_id, error = ?e, "Failed to parse track ID"))
+						.ok()?;
+					let track = api
+						.get_track(track_id_i64)
+						.await
+						.map_err(|e| tracing::warn!(track_id = %track_id_i64, error = ?e, "Failed to fetch track for playlist"))
+						.ok()?;
+					Some(map_tidal_track_to_subsonic(&track, Some(ctx), None, None))
+				})
+				.await;
 
 				sub_playlist.entry = Some(songs);
 			}
