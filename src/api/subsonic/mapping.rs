@@ -2,7 +2,6 @@ use crate::api::subsonic::middleware::SubsonicContext;
 use crate::api::subsonic::models::{Album, Artist, Playlist, Song};
 use crate::db::LocalPlaylistWithCount;
 use crate::tidal::api::ARTIST_ALBUM_COUNT_CACHE;
-use crate::tidal::favorites::{get_favorite_date, get_local_favorite_date};
 use crate::tidal::models::entities::{
 	Album as TidalAlbum, Artist as TidalArtist, Playlist as TidalPlaylist, Track as TidalTrack,
 };
@@ -31,13 +30,16 @@ fn format_date(date_str: Option<&str>) -> String {
 				}
 			}
 			7 => {
-				if let Ok(nd) = NaiveDate::parse_from_str(&format!("{}-01", date_str), "%Y-%m-%d") {
+				if let (Ok(year), Ok(month)) =
+					(date_str[0..4].parse::<i32>(), date_str[5..7].parse::<u32>())
+					&& let Some(nd) = NaiveDate::from_ymd_opt(year, month, 1)
+				{
 					return nd.and_hms_opt(0, 0, 0).unwrap().and_utc().to_rfc3339();
 				}
 			}
 			4 => {
-				if let Ok(nd) =
-					NaiveDate::parse_from_str(&format!("{}-01-01", date_str), "%Y-%m-%d")
+				if let Ok(year) = date_str[0..4].parse::<i32>()
+					&& let Some(nd) = NaiveDate::from_ymd_opt(year, 1, 1)
 				{
 					return nd.and_hms_opt(0, 0, 0).unwrap().and_utc().to_rfc3339();
 				}
@@ -83,15 +85,7 @@ pub fn map_tidal_artist_to_subsonic(
 		)
 	});
 
-	let starred = subsonic_ctx.and_then(|ctx| {
-		if ctx.use_favorites {
-			get_local_favorite_date(&ctx.user, artist.id)
-		} else {
-			ctx.tidal_api
-				.user_id()
-				.and_then(|uid| get_favorite_date(uid, artist.id))
-		}
-	});
+	let starred = subsonic_ctx.and_then(|ctx| ctx.get_starred_date(artist.id));
 
 	Artist {
 		id: artist.id.to_string(),
@@ -134,15 +128,7 @@ pub fn map_tidal_album_to_subsonic(
 
 	let cover_art_id = album.cover.clone().unwrap_or_else(|| album.id.to_string());
 
-	let starred = subsonic_ctx.and_then(|ctx| {
-		if ctx.use_favorites {
-			get_local_favorite_date(&ctx.user, album.id)
-		} else {
-			ctx.tidal_api
-				.user_id()
-				.and_then(|uid| get_favorite_date(uid, album.id))
-		}
-	});
+	let starred = subsonic_ctx.and_then(|ctx| ctx.get_starred_date(album.id));
 
 	let album_title = album.title.clone();
 
@@ -240,15 +226,7 @@ pub fn map_tidal_track_to_subsonic(
 		.map(|tags| tags.iter().any(|t| t == "DOLBY_ATMOS"))
 		.unwrap_or(false);
 
-	let starred = subsonic_ctx.and_then(|ctx| {
-		if ctx.use_favorites {
-			get_local_favorite_date(&ctx.user, track.id)
-		} else {
-			ctx.tidal_api
-				.user_id()
-				.and_then(|uid| get_favorite_date(uid, track.id))
-		}
-	});
+	let starred = subsonic_ctx.and_then(|ctx| ctx.get_starred_date(track.id));
 
 	Song {
 		id: track.id.to_string(),
@@ -358,21 +336,24 @@ pub fn dedupe_albums(albums: impl IntoIterator<Item = TidalAlbum>) -> Vec<TidalA
 			_ => 0,
 		};
 
-		if let Some(existing) = map.get(&key) {
-			let new_rank = get_rank(&album);
-			let old_rank = get_rank(existing);
+		match map.entry(key) {
+			std::collections::hash_map::Entry::Occupied(mut entry) => {
+				let new_rank = get_rank(&album);
+				let old_rank = get_rank(entry.get());
 
-			let should_replace = if new_rank != old_rank {
-				new_rank > old_rank
-			} else {
-				album.explicit == Some(true) && existing.explicit != Some(true)
-			};
+				let should_replace = if new_rank != old_rank {
+					new_rank > old_rank
+				} else {
+					album.explicit == Some(true) && entry.get().explicit != Some(true)
+				};
 
-			if should_replace {
-				map.insert(key, album);
+				if should_replace {
+					entry.insert(album);
+				}
 			}
-		} else {
-			map.insert(key, album);
+			std::collections::hash_map::Entry::Vacant(entry) => {
+				entry.insert(album);
+			}
 		}
 	}
 
