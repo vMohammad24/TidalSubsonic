@@ -354,27 +354,19 @@ pub struct FavoriteItem<T> {
 	pub item: T,
 }
 
-impl Album {
-	pub fn cache(&self) {
-		let album = self.clone();
-		tokio::spawn(async move {
-			ALBUM_CACHE.insert(album.id, album).await;
-		});
-	}
+macro_rules! impl_cacheable {
+	($type:ty, $cache_static:ident) => {
+		impl $type {
+			pub fn cache(&self) {
+				let item = self.clone();
+				tokio::spawn(async move {
+					$cache_static.insert(item.id, item).await;
+				});
+			}
+		}
+	};
 }
-impl Track {
-	pub fn cache(&self) {
-		let track = self.clone();
-		tokio::spawn(async move {
-			TRACK_CACHE.insert(track.id, track).await;
-		});
-	}
-}
-impl Artist {
-	pub fn cache(&self) {
-		let artist = self.clone();
-		tokio::spawn(async move {
-			ARTIST_CACHE.insert(artist.id, artist).await;
-		});
-	}
-}
+
+impl_cacheable!(Album, ALBUM_CACHE);
+impl_cacheable!(Track, TRACK_CACHE);
+impl_cacheable!(Artist, ARTIST_CACHE);
