@@ -22,6 +22,25 @@ pub async fn set_rating(query: web::Query<SetRatingQuery>) -> impl Responder {
 	SubsonicResponder(SubsonicResponseWrapper::ok())
 }
 
+fn compute_lastfm_signature<K: AsRef<str>, V: AsRef<str>>(
+	params: &[(K, V)],
+	api_secret: &str,
+) -> String {
+	let mut sorted: Vec<_> = params
+		.iter()
+		.map(|(k, v)| (k.as_ref(), v.as_ref()))
+		.collect();
+	sorted.sort_unstable_by(|a, b| a.0.cmp(b.0));
+
+	let mut sig_str = String::new();
+	for (k, v) in sorted {
+		sig_str.push_str(k);
+		sig_str.push_str(v);
+	}
+	sig_str.push_str(api_secret);
+	format!("{:x}", md5::compute(sig_str))
+}
+
 pub async fn scrobble(
 	req: actix_web::HttpRequest,
 	subsonic_ctx: actix_web::web::ReqData<crate::api::subsonic::middleware::SubsonicContext>,
@@ -93,15 +112,7 @@ pub async fn scrobble(
 			let duration_str = track.duration.to_string();
 			params.push(("duration", &duration_str));
 
-			params.sort_unstable_by(|a, b| a.0.cmp(b.0));
-			let mut sig_str = String::new();
-			for (k, v) in &params {
-				sig_str.push_str(k);
-				sig_str.push_str(v);
-			}
-			sig_str.push_str(&api_secret);
-			let api_sig = format!("{:x}", md5::compute(sig_str));
-
+			let api_sig = compute_lastfm_signature(&params, &api_secret);
 			params.push(("api_sig", &api_sig));
 			let _ = reqwest_client.post(url).form(&params).send().await;
 		}
@@ -148,15 +159,7 @@ pub async fn scrobble(
 		}
 
 		if count > 0 {
-			params.sort_unstable_by(|a, b| a.0.cmp(&b.0));
-			let mut sig_str = String::new();
-			for (k, v) in &params {
-				sig_str.push_str(k);
-				sig_str.push_str(v);
-			}
-			sig_str.push_str(&api_secret);
-			let api_sig = format!("{:x}", md5::compute(sig_str));
-
+			let api_sig = compute_lastfm_signature(&params, &api_secret);
 			params.push(("api_sig".into(), api_sig));
 			let _ = reqwest_client.post(url).form(&params).send().await;
 		}
