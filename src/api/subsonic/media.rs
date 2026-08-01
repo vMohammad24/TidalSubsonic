@@ -119,6 +119,52 @@ impl DashManifestParser {
 	}
 }
 
+pub fn build_dash_segment_stream(
+	urls: Vec<String>,
+	client: reqwest::Client,
+	concurrency: usize,
+) -> impl futures_util::Stream<Item = Result<actix_web::web::Bytes, actix_web::Error>> {
+	stream::iter(urls)
+		.map(move |url| {
+			let client = client.clone();
+			async move {
+				let fetch_fut = client.get(&url).send();
+				match tokio::time::timeout(std::time::Duration::from_secs(10), fetch_fut).await {
+					Ok(Ok(res)) if res.status().is_success() => Ok(res
+						.bytes_stream()
+						.map_err(actix_web::error::ErrorInternalServerError)),
+					Ok(Ok(res)) => {
+						tracing::error!(
+							"DASH segment returned non-success status: {}",
+							res.status()
+						);
+						Err(actix_web::error::ErrorInternalServerError(
+							"DASH segment fetch error",
+						))
+					}
+					Ok(Err(e)) => {
+						tracing::error!(error = %e, "Network error fetching DASH segment");
+						Err(actix_web::error::ErrorInternalServerError(
+							"DASH segment network error",
+						))
+					}
+					Err(_) => {
+						tracing::error!("Timeout fetching DASH segment URL: {}", url);
+						Err(actix_web::error::ErrorGatewayTimeout(
+							"DASH segment fetch timeout",
+						))
+					}
+				}
+			}
+		})
+		.buffered(concurrency)
+		.map(|res| match res {
+			Ok(st) => st.left_stream(),
+			Err(e) => stream::once(async { Err(e) }).right_stream(),
+		})
+		.flatten()
+}
+
 fn parse_dash_manifest(xml: &str) -> Result<DashManifest, String> {
 	let mut reader = Reader::from_str(xml);
 	reader.config_mut().trim_text(true);
@@ -301,29 +347,7 @@ pub async fn download(
 					"flac"
 				};
 
-				let stream = stream::iter(manifest.urls)
-					.map(move |url| {
-						let client = client.clone();
-						async move {
-							match client.get(&url).send().await {
-								Ok(res) if res.status().is_success() => Ok(res
-									.bytes_stream()
-									.map_err(actix_web::error::ErrorInternalServerError)),
-								e => {
-									tracing::error!(error = ?e, "Failed to fetch DASH segment: {}", url);
-									Err(actix_web::error::ErrorInternalServerError(
-										"Failed to fetch DASH segment",
-									))
-								}
-							}
-						}
-					})
-					.buffered(15)
-					.map(|res| match res {
-						Ok(st) => st.left_stream(),
-						Err(e) => stream::once(async { Err(e) }).right_stream(),
-					})
-					.flatten();
+				let stream = build_dash_segment_stream(manifest.urls, client, 15);
 
 				return HttpResponse::Ok()
 					.content_type(content_type)
@@ -486,29 +510,7 @@ pub async fn stream(
 					manifest.mime_type
 				};
 
-				let stream = stream::iter(urls)
-					.map(move |url| {
-						let client = client.clone();
-						async move {
-							match client.get(&url).send().await {
-								Ok(res) if res.status().is_success() => Ok(res
-									.bytes_stream()
-									.map_err(actix_web::error::ErrorInternalServerError)),
-								e => {
-									tracing::error!(error = ?e, "Failed to fetch DASH segment: {}", url);
-									Err(actix_web::error::ErrorInternalServerError(
-										"Failed to fetch DASH segment",
-									))
-								}
-							}
-						}
-					})
-					.buffered(3)
-					.map(|res| match res {
-						Ok(st) => st.left_stream(),
-						Err(e) => stream::once(async { Err(e) }).right_stream(),
-					})
-					.flatten();
+				let stream = build_dash_segment_stream(urls, client, 3);
 
 				return HttpResponse::Ok()
 					.content_type(content_type)
