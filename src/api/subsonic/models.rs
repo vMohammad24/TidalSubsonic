@@ -22,8 +22,63 @@ pub struct SubsonicLyrics {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct Child {
+#[serde(untagged)]
+pub enum Child {
+	Artist(ArtistNode),
+	Album(AlbumNode),
+	Song(Box<SongNode>),
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ArtistNode {
+	#[serde(rename = "@id")]
+	pub id: String,
+	#[serde(rename = "@parent", skip_serializing_if = "Option::is_none")]
+	pub parent: Option<String>,
+	#[serde(rename = "@title")]
+	pub title: String,
+	#[serde(rename = "@artist", skip_serializing_if = "Option::is_none")]
+	pub artist: Option<String>,
+	#[serde(rename = "@isDir")]
+	pub is_dir: bool,
+	#[serde(rename = "@coverArt", skip_serializing_if = "Option::is_none")]
+	pub cover_art: Option<String>,
+	#[serde(rename = "@artistId", skip_serializing_if = "Option::is_none")]
+	pub artist_id: Option<String>,
+	#[serde(rename = "@starred", skip_serializing_if = "Option::is_none")]
+	pub starred: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct AlbumNode {
+	#[serde(rename = "@id")]
+	pub id: String,
+	#[serde(rename = "@parent", skip_serializing_if = "Option::is_none")]
+	pub parent: Option<String>,
+	#[serde(rename = "@title")]
+	pub title: String,
+	#[serde(rename = "@artist", skip_serializing_if = "Option::is_none")]
+	pub artist: Option<String>,
+	#[serde(rename = "@isDir")]
+	pub is_dir: bool,
+	#[serde(rename = "@coverArt", skip_serializing_if = "Option::is_none")]
+	pub cover_art: Option<String>,
+	#[serde(rename = "@duration", skip_serializing_if = "Option::is_none")]
+	pub duration: Option<i64>,
+	#[serde(rename = "@artistId", skip_serializing_if = "Option::is_none")]
+	pub artist_id: Option<String>,
+	#[serde(rename = "@year", skip_serializing_if = "Option::is_none")]
+	pub year: Option<i32>,
+	#[serde(rename = "@starred", skip_serializing_if = "Option::is_none")]
+	pub starred: Option<String>,
+	#[serde(rename = "@created", skip_serializing_if = "Option::is_none")]
+	pub created: Option<String>,
+	#[serde(rename = "@explicitStatus", skip_serializing_if = "Option::is_none")]
+	pub explicit_status: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SongNode {
 	#[serde(rename = "@id")]
 	pub id: String,
 	#[serde(rename = "@parent", skip_serializing_if = "Option::is_none")]
@@ -74,6 +129,70 @@ pub struct Child {
 	pub created: Option<String>,
 	#[serde(rename = "@explicitStatus", skip_serializing_if = "Option::is_none")]
 	pub explicit_status: Option<String>,
+}
+
+impl Child {
+	pub fn from_artist(artist: Artist, parent_id: impl Into<String>) -> Self {
+		let artist_id = artist.id;
+		let artist_name = artist.name;
+		Child::Artist(ArtistNode {
+			id: artist_id.clone(),
+			parent: Some(parent_id.into()),
+			title: artist_name.clone(),
+			artist: Some(artist_name),
+			is_dir: true,
+			cover_art: Some(artist.cover_art),
+			artist_id: Some(artist_id),
+			starred: artist.starred,
+		})
+	}
+
+	pub fn from_song(song: Song, parent_id: impl Into<String>) -> Self {
+		Child::Song(Box::new(SongNode {
+			id: song.id,
+			parent: Some(parent_id.into()),
+			title: song.title,
+			album: Some(song.album),
+			artist: Some(song.artist),
+			is_dir: false,
+			is_video: Some(song.is_video),
+			type_: Some(song.type_),
+			cover_art: Some(song.cover_art),
+			duration: Some(song.duration),
+			bit_rate: Some(song.bit_rate),
+			track: Some(song.track),
+			album_id: Some(song.album_id),
+			artist_id: Some(song.artist_id),
+			size: Some(song.size),
+			suffix: Some(song.suffix),
+			content_type: Some(song.content_type),
+			year: song.year,
+			genre: song.genre,
+			starred: song.starred,
+			path: song.path,
+			play_count: song.play_count,
+			disc_number: song.disc_number,
+			created: song.created,
+			explicit_status: song.explicit_status,
+		}))
+	}
+
+	pub fn from_album(album: Album, parent_id: impl Into<String>) -> Self {
+		Child::Album(AlbumNode {
+			id: album.id,
+			parent: Some(parent_id.into()),
+			title: album.name,
+			artist: Some(album.artist),
+			is_dir: true,
+			cover_art: Some(album.cover_art),
+			duration: Some(album.duration),
+			artist_id: Some(album.artist_id),
+			year: album.year,
+			starred: album.starred,
+			created: Some(album.created),
+			explicit_status: album.explicit_status,
+		})
+	}
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

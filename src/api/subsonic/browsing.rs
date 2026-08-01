@@ -116,15 +116,19 @@ pub async fn get_top_songs(
 	if let Some(artist_id) = target_artist_id
 		&& let Ok(top_tracks) = api.get_artist_top_tracks(artist_id, count, 0).await
 	{
-		let mut songs = Vec::new();
-		for track in top_tracks.items.into_iter().take(count as usize) {
-			songs.push(crate::api::subsonic::mapping::map_tidal_track_to_subsonic(
-				&track,
-				Some(&subsonic_ctx),
-				None,
-				None,
-			));
-		}
+		let songs: Vec<_> = top_tracks
+			.items
+			.into_iter()
+			.take(count as usize)
+			.map(|track| {
+				crate::api::subsonic::mapping::map_tidal_track_to_subsonic(
+					&track,
+					Some(&subsonic_ctx),
+					None,
+					None,
+				)
+			})
+			.collect();
 		resp.response.top_songs = Some(TopSongs { song: songs });
 	}
 
@@ -141,15 +145,18 @@ pub async fn get_similar_songs(
 
 	if let Ok(track_id) = query.id.parse::<i64>() {
 		if let Ok(recommendations) = api.get_track_recommendations(track_id, limit, 0).await {
-			let mut songs = Vec::new();
-			for rec_item in recommendations.items {
-				songs.push(crate::api::subsonic::mapping::map_tidal_track_to_subsonic(
-					&rec_item.track,
-					Some(&subsonic_ctx),
-					None,
-					None,
-				));
-			}
+			let songs: Vec<_> = recommendations
+				.items
+				.into_iter()
+				.map(|rec_item| {
+					crate::api::subsonic::mapping::map_tidal_track_to_subsonic(
+						&rec_item.track,
+						Some(&subsonic_ctx),
+						None,
+						None,
+					)
+				})
+				.collect();
 			resp.response.similar_songs = Some(SimilarSongs { song: songs });
 		} else {
 			return SubsonicResponder(SubsonicResponseWrapper::error(
@@ -235,13 +242,17 @@ pub async fn get_artist_info(
 	{
 		let mut bio_str = None;
 		if let Ok(bio) = api.get_artist_bio(artist_id).await {
-			let re_tags = Regex::new(r"<[^>]+>").unwrap();
-			let re_wimp = Regex::new(r"\[wimpLink.*?\](.*?)\[/wimpLink\]").unwrap();
-			let re_footer = Regex::new(r"~.*$").unwrap();
+			static RE_TAGS: std::sync::LazyLock<Regex> =
+				std::sync::LazyLock::new(|| Regex::new(r"<[^>]+>").unwrap());
+			static RE_WIMP: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
+				Regex::new(r"\[wimpLink.*?\](.*?)\[/wimpLink\]").unwrap()
+			});
+			static RE_FOOTER: std::sync::LazyLock<Regex> =
+				std::sync::LazyLock::new(|| Regex::new(r"~.*$").unwrap());
 
-			let cleaned = re_tags.replace_all(&bio.text, "");
-			let cleaned = re_wimp.replace_all(&cleaned, "$1");
-			let cleaned = re_footer.replace_all(&cleaned, "");
+			let cleaned = RE_TAGS.replace_all(&bio.text, "");
+			let cleaned = RE_WIMP.replace_all(&cleaned, "$1");
+			let cleaned = RE_FOOTER.replace_all(&cleaned, "");
 
 			bio_str = Some(cleaned.trim().to_string());
 		}
@@ -309,24 +320,28 @@ pub async fn get_random_songs(
 	let mut response = SubsonicResponseWrapper::ok();
 
 	let api = &subsonic_ctx.tidal_api;
-	let mut random_songs = Vec::new();
-
-	if let Ok(tracks_result) = api
+	let random_songs = if let Ok(tracks_result) = api
 		.get_genre_tracks(genre, std::cmp::max(size * 2, 50), 0)
 		.await
 	{
 		let mut tracks = tracks_result.items;
 		tracks.sort_by_key(|t| t.id.wrapping_mul(123456789) % 100);
 
-		for track in tracks.into_iter().take(size as usize) {
-			random_songs.push(crate::api::subsonic::mapping::map_tidal_track_to_subsonic(
-				&track,
-				Some(&subsonic_ctx),
-				None,
-				None,
-			));
-		}
-	}
+		tracks
+			.into_iter()
+			.take(size as usize)
+			.map(|track| {
+				crate::api::subsonic::mapping::map_tidal_track_to_subsonic(
+					&track,
+					Some(&subsonic_ctx),
+					None,
+					None,
+				)
+			})
+			.collect()
+	} else {
+		Vec::new()
+	};
 
 	response.response.random_songs =
 		Some(crate::api::subsonic::models::RandomSongs { song: random_songs });
@@ -356,18 +371,22 @@ pub async fn get_songs_by_genre(
 	let mut response = SubsonicResponseWrapper::ok();
 
 	let api = &subsonic_ctx.tidal_api;
-	let mut genre_songs = Vec::new();
-
-	if let Ok(tracks_result) = api.get_genre_tracks(genre, count, offset).await {
-		for track in tracks_result.items {
-			genre_songs.push(crate::api::subsonic::mapping::map_tidal_track_to_subsonic(
-				&track,
-				Some(&subsonic_ctx),
-				None,
-				None,
-			));
-		}
-	}
+	let genre_songs = if let Ok(tracks_result) = api.get_genre_tracks(genre, count, offset).await {
+		tracks_result
+			.items
+			.into_iter()
+			.map(|track| {
+				crate::api::subsonic::mapping::map_tidal_track_to_subsonic(
+					&track,
+					Some(&subsonic_ctx),
+					None,
+					None,
+				)
+			})
+			.collect()
+	} else {
+		Vec::new()
+	};
 
 	response.response.songs_by_genre =
 		Some(crate::api::subsonic::models::SongsByGenre { song: genre_songs });
@@ -652,35 +671,7 @@ pub async fn get_music_directory(
 				&artist_entry.1,
 				Some(&subsonic_ctx),
 			);
-			let artist_id = artist.id;
-			let artist_name = artist.name;
-			children.push(Child {
-				id: artist_id.clone(),
-				parent: Some("1".to_string()),
-				title: artist_name.clone(),
-				album: None,
-				artist: Some(artist_name),
-				is_dir: true,
-				is_video: None,
-				type_: None,
-				cover_art: Some(artist.cover_art),
-				duration: None,
-				bit_rate: None,
-				track: None,
-				album_id: None,
-				artist_id: Some(artist_id),
-				size: None,
-				suffix: None,
-				content_type: None,
-				year: None,
-				genre: None,
-				starred: artist.starred,
-				path: None,
-				play_count: None,
-				disc_number: None,
-				created: None,
-				explicit_status: None,
-			});
+			children.push(Child::from_artist(artist, "1"));
 		}
 		resp.response.directory = Some(Directory {
 			id: "1".to_string(),
@@ -703,33 +694,7 @@ pub async fn get_music_directory(
 						Some(&tidal_album),
 						None,
 					);
-					children.push(Child {
-						id: song.id,
-						parent: Some(folder_id.clone()),
-						title: song.title,
-						album: Some(song.album),
-						artist: Some(song.artist),
-						is_dir: false,
-						is_video: Some(song.is_video),
-						type_: Some(song.type_),
-						cover_art: Some(song.cover_art),
-						duration: Some(song.duration),
-						bit_rate: Some(song.bit_rate),
-						track: Some(song.track),
-						album_id: Some(song.album_id),
-						artist_id: Some(song.artist_id),
-						size: Some(song.size),
-						suffix: Some(song.suffix),
-						content_type: Some(song.content_type),
-						year: song.year,
-						genre: song.genre,
-						starred: song.starred,
-						path: song.path,
-						play_count: song.play_count,
-						disc_number: song.disc_number,
-						created: song.created,
-						explicit_status: song.explicit_status,
-					});
+					children.push(Child::from_song(song, &folder_id));
 				}
 			}
 			resp.response.directory = Some(Directory {
@@ -754,33 +719,7 @@ pub async fn get_music_directory(
 						Some(&subsonic_ctx),
 						Some(std::slice::from_ref(&tidal_artist)),
 					);
-					children.push(Child {
-						id: album.id,
-						parent: Some(folder_id.clone()),
-						title: album.name,
-						album: None,
-						artist: Some(album.artist),
-						is_dir: true,
-						is_video: None,
-						type_: None,
-						cover_art: Some(album.cover_art),
-						duration: Some(album.duration),
-						bit_rate: None,
-						track: None,
-						album_id: None,
-						artist_id: Some(album.artist_id),
-						size: None,
-						suffix: None,
-						content_type: None,
-						year: album.year,
-						genre: None,
-						starred: album.starred,
-						path: None,
-						play_count: None,
-						disc_number: None,
-						created: Some(album.created),
-						explicit_status: album.explicit_status,
-					});
+					children.push(Child::from_album(album, &folder_id));
 				}
 			}
 			resp.response.directory = Some(Directory {
