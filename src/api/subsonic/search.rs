@@ -143,65 +143,26 @@ async fn handle_search(
 			}
 		}
 	} else {
-		let s = if song_limit > 0 {
-			let mut cached_tracks: Vec<_> = TRACK_CACHE.iter().collect();
-			cached_tracks.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+		let s = paginate_cache(&TRACK_CACHE, song_offset, song_limit, |track| {
+			crate::api::subsonic::mapping::map_tidal_track_to_subsonic(
+				track,
+				Some(&subsonic_ctx),
+				None,
+				None,
+			)
+		});
 
-			cached_tracks
-				.into_iter()
-				.skip(song_offset)
-				.take(song_limit)
-				.map(|(_, track)| {
-					crate::api::subsonic::mapping::map_tidal_track_to_subsonic(
-						&track,
-						Some(&subsonic_ctx),
-						None,
-						None,
-					)
-				})
-				.collect()
-		} else {
-			Vec::new()
-		};
+		let b = paginate_cache(&ALBUM_CACHE, album_offset, album_limit, |album| {
+			crate::api::subsonic::mapping::map_tidal_album_to_subsonic(
+				album,
+				Some(&subsonic_ctx),
+				None,
+			)
+		});
 
-		let b = if album_limit > 0 {
-			let mut cached_albums: Vec<_> = ALBUM_CACHE.iter().collect();
-			cached_albums.sort_unstable_by(|a, b| a.0.cmp(&b.0));
-
-			cached_albums
-				.into_iter()
-				.skip(album_offset)
-				.take(album_limit)
-				.map(|(_, album)| {
-					crate::api::subsonic::mapping::map_tidal_album_to_subsonic(
-						&album,
-						Some(&subsonic_ctx),
-						None,
-					)
-				})
-				.collect()
-		} else {
-			Vec::new()
-		};
-
-		let r = if artist_limit > 0 {
-			let mut cached_artists: Vec<_> = ARTIST_CACHE.iter().collect();
-			cached_artists.sort_unstable_by(|a, b| a.0.cmp(&b.0));
-
-			cached_artists
-				.into_iter()
-				.skip(artist_offset)
-				.take(artist_limit)
-				.map(|(_, artist)| {
-					crate::api::subsonic::mapping::map_tidal_artist_to_subsonic(
-						&artist,
-						Some(&subsonic_ctx),
-					)
-				})
-				.collect()
-		} else {
-			Vec::new()
-		};
+		let r = paginate_cache(&ARTIST_CACHE, artist_offset, artist_limit, |artist| {
+			crate::api::subsonic::mapping::map_tidal_artist_to_subsonic(artist, Some(&subsonic_ctx))
+		});
 
 		(s, b, r)
 	};
@@ -237,4 +198,27 @@ async fn handle_search(
 	SubsonicResponder(resp)
 		.customize()
 		.insert_header(("X-Total-Count", total_count.to_string()))
+}
+
+fn paginate_cache<T, M, R>(
+	cache: &moka::future::Cache<i64, T>,
+	offset: usize,
+	limit: usize,
+	mapper: M,
+) -> Vec<R>
+where
+	T: Clone + Send + Sync + 'static,
+	M: Fn(&T) -> R,
+{
+	if limit == 0 {
+		return Vec::new();
+	}
+	let mut items: Vec<_> = cache.iter().collect();
+	items.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+	items
+		.into_iter()
+		.skip(offset)
+		.take(limit)
+		.map(|(_, item)| mapper(&item))
+		.collect()
 }
