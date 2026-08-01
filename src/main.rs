@@ -10,6 +10,7 @@ use tracing::{Level, info};
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
 mod api;
+mod config;
 mod db;
 mod tidal;
 mod util;
@@ -25,6 +26,8 @@ async fn main() -> std::io::Result<()> {
 		)
 		.finish();
 	let _ = tracing::subscriber::set_global_default(subscriber);
+
+	let app_config = config::AppConfig::from_env();
 
 	match tidal::config::TidalCredentials::from_env() {
 		Ok(creds) => {
@@ -44,8 +47,8 @@ async fn main() -> std::io::Result<()> {
 		.unwrap_or_else(|_| "postgres://postgres:postgres@localhost:5432/tss".to_string());
 
 	info!("Connecting to database...");
-	let db_manager = match db::DbManager::new(&database_url).await {
-		Ok(db) => Arc::new(db),
+	let db_manager = match db::DbManager::new(&app_config.database_url).await {
+		Ok(db) => db,
 		Err(e) => {
 			tracing::error!("Failed to connect to database: {}", e);
 			std::process::exit(1);
@@ -64,7 +67,7 @@ async fn main() -> std::io::Result<()> {
 		Ok(s) => {
 			if s.len() < 64 {
 				panic!(
-					"SESSION_SECRET is too short ({} chars), it should be at least 64 characters for security. It will be hashed, but longer is better.",
+					"SESSION_SECRET is too short ({} chars), it should be at least 64 characters for security.",
 					s.len()
 				);
 			}
@@ -78,7 +81,7 @@ async fn main() -> std::io::Result<()> {
 				Key::generate()
 			} else {
 				panic!(
-					"SESSION_SECRET environment variable is required in production (min 64 chars recommended, but will be hashed)"
+					"SESSION_SECRET environment variable is required in production (min 64 chars recommended)"
 				);
 			}
 		}
@@ -91,10 +94,7 @@ async fn main() -> std::io::Result<()> {
 		db_manager.clone(),
 	));
 
-	let port = env::var("PORT").unwrap_or_else(|_| "8080".to_string());
-	let host = env::var("HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
-	let bind_addr = format!("{}:{}", host, port);
-
+	let bind_addr = format!("{}:{}", app_config.host, app_config.port);
 	info!("Starting server on {}", bind_addr);
 
 	HttpServer::new(move || {
@@ -103,8 +103,9 @@ async fn main() -> std::io::Result<()> {
 				CookieSessionStore::default(),
 				secret_key.clone(),
 			))
-			.app_data(web::Data::new(tidal_manager.clone()))
-			.app_data(web::Data::new(db_manager.clone()))
+			.app_data(app_config_data.clone())
+			.app_data(tidal_manager_data.clone())
+			.app_data(db_manager_data.clone())
 			.route("/health", web::get().to(api::health::health_check))
 			.configure(api::auth::config)
 			.configure(api::lastfm::config)
