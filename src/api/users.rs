@@ -3,7 +3,7 @@ use crate::util::crypto;
 use crate::util::session::extract_user_id;
 use actix_web::{HttpRequest, HttpResponse, Responder, web};
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+use validator::Validate;
 
 pub fn config(cfg: &mut web::ServiceConfig) {
 	cfg.route("/api/users", web::get().to(get_users))
@@ -24,9 +24,11 @@ struct UserResponse {
 	scrobbles: i64,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Validate)]
 struct CreateUserReq {
+	#[validate(length(min = 1, max = 64))]
 	username: Option<String>,
+	#[validate(length(min = 1, max = 128))]
 	password: Option<String>,
 }
 
@@ -42,52 +44,23 @@ struct DeleteUserReq {
 	username: Option<String>,
 }
 
-async fn get_users(
-	req: HttpRequest,
-	manager: web::Data<Arc<TidalClientManager>>,
-) -> impl Responder {
+async fn get_users(req: HttpRequest, manager: web::Data<TidalClientManager>) -> impl Responder {
 	let Some(tidal_user_id) = extract_user_id(&req, &manager).await else {
 		return HttpResponse::Unauthorized()
 			.json(serde_json::json!({ "error": "User ID not found" }));
 	};
 
-	let Ok(usernames) = manager
-		.db
-		.list_users_for_tidal_account(&tidal_user_id)
-		.await
-	else {
-		return HttpResponse::InternalServerError().json(serde_json::json!({"error": "DB Error"}));
-	};
-
-	let mut users_with_details = Vec::new();
-	for u in usernames {
-		if let Ok(Some((_, _, use_playlists, use_favorites, _))) =
-			manager.db.get_user_details(&u).await
-		{
-			let lastfm_username = manager
-				.db
-				.get_lastfm_details(&u)
-				.await
-				.ok()
-				.flatten()
-				.map(|(_, name)| name);
-
-			let scrobbles = manager
-				.db
-				.get_scrobble_count(&u)
-				.await
-				.ok()
-				.flatten()
-				.unwrap_or(0);
-			users_with_details.push(UserResponse {
-				username: u,
-				lastfm_username,
-				use_playlists,
-				use_favorites,
-				scrobbles,
-			});
-		}
-	}
+	let users = crate::util::session::get_users_info(&tidal_user_id, &manager.db).await;
+	let users_with_details: Vec<_> = users
+		.into_iter()
+		.map(|u| UserResponse {
+			username: u.username,
+			lastfm_username: u.lastfm_username,
+			use_playlists: u.use_playlists,
+			use_favorites: u.use_favorites,
+			scrobbles: u.scrobbles,
+		})
+		.collect();
 
 	HttpResponse::Ok().json(serde_json::json!({ "users": users_with_details }))
 }
@@ -110,6 +83,12 @@ async fn create_user(
 	if !CREATE_USER_LIMITER.check_and_increment(&client_ip) {
 		return HttpResponse::TooManyRequests().json(serde_json::json!({
 			"error": "Rate limit exceeded"
+		}));
+	}
+	if let Err(errors) = req_body.validate() {
+		return HttpResponse::BadRequest().json(serde_json::json!({
+			"error": "Input validation failed",
+			"details": errors.to_string()
 		}));
 	}
 	let Some(tidal_user_id) = extract_user_id(&req, &manager).await else {
@@ -181,7 +160,18 @@ async fn update_features(
 			.json(serde_json::json!({ "error": "Missing username, feature, or enabled flag" }));
 	};
 
-	let (user_tidal_id, _, mut use_playlists, mut use_favorites, use_event_batch) =
+	if !manager
+		.db
+		.verify_user_ownership(username, &tidal_user_id)
+		.await
+		.unwrap_or(false)
+	{
+		return HttpResponse::Forbidden().json(
+			serde_json::json!({ "error": "User not found or does not belong to this Tidal account" }),
+		);
+	}
+
+	let (_, _, mut use_playlists, mut use_favorites, use_event_batch) =
 		match manager.db.get_user_details(username).await {
 			Ok(Some(d)) => d,
 			_ => {
@@ -190,12 +180,6 @@ async fn update_features(
 				);
 			}
 		};
-
-	if user_tidal_id != tidal_user_id {
-		return HttpResponse::Forbidden().json(
-			serde_json::json!({ "error": "User not found or does not belong to this Tidal account" }),
-		);
-	}
 
 	if feature == "usePlaylists" {
 		use_playlists = enabled;
@@ -229,16 +213,12 @@ async fn delete_user(
 			.json(serde_json::json!({ "error": "Username is required" }));
 	};
 
-	let (user_tidal_id, _, _, _, _) = match manager.db.get_user_details(username).await {
-		Ok(Some(d)) => d,
-		_ => {
-			return HttpResponse::Forbidden().json(
-				serde_json::json!({ "error": "User not found or does not belong to this Tidal account" }),
-			);
-		}
-	};
-
-	if user_tidal_id != tidal_user_id {
+	if !manager
+		.db
+		.verify_user_ownership(username, &tidal_user_id)
+		.await
+		.unwrap_or(false)
+	{
 		return HttpResponse::Forbidden().json(
 			serde_json::json!({ "error": "User not found or does not belong to this Tidal account" }),
 		);
