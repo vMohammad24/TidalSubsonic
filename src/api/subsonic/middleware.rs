@@ -12,12 +12,18 @@ use md5;
 use serde::Deserialize;
 use std::future::{Ready, ready};
 use std::sync::Arc;
+use tracing::Instrument;
+use validator::Validate;
 
-#[derive(Clone, Deserialize, Debug)]
+#[derive(Clone, Deserialize, Debug, Validate)]
 pub struct SubsonicQuery {
+	#[validate(length(min = 1, max = 128))]
 	pub u: String,
+	#[validate(length(min = 1, max = 256))]
 	pub p: Option<String>,
+	#[validate(length(min = 1, max = 128))]
 	pub t: Option<String>,
+	#[validate(length(min = 1, max = 128))]
 	pub s: Option<String>,
 	pub f: Option<String>,
 }
@@ -29,6 +35,18 @@ pub struct SubsonicContext {
 	pub tidal_api: TidalApi,
 	pub use_playlists: bool,
 	pub use_favorites: bool,
+}
+
+impl SubsonicContext {
+	pub fn get_starred_date(&self, item_id: i64) -> Option<String> {
+		if self.use_favorites {
+			crate::tidal::favorites::get_local_favorite_date(&self.user, item_id)
+		} else {
+			self.tidal_api
+				.user_id()
+				.and_then(|uid| crate::tidal::favorites::get_favorite_date(uid, item_id))
+		}
+	}
 }
 
 pub struct SubsonicAuth;
@@ -85,6 +103,11 @@ where
 
 		match auth_res {
 			Ok(query) => {
+				if query.validate().is_err() {
+					return Box::pin(async move {
+						Err(ErrorUnauthorized("Invalid request parameters"))
+					});
+				}
 				let SubsonicQuery {
 					u: username,
 					p,
@@ -113,73 +136,143 @@ where
 					return Box::pin(async move { service.call(req).await });
 				}
 
-				Box::pin(async move {
-					let mut authenticated = false;
-					let mut use_playlists = true;
-					let mut use_favorites = true;
+				let span = tracing::info_span!(
+					"subsonic_request",
+					username = %username,
+					format = %format,
+					path = %path
+				);
 
-					if let Some(ref db) = (db)
-						&& let Ok(Some((_, enc_password, up, uf, _))) =
-							db.get_user_details(&username).await
-						&& let Ok(plain_password) = crypto::decrypt_string(&enc_password)
-					{
-						use_playlists = up;
-						use_favorites = uf;
-						if let (Some(t), Some(s)) = (&t, &s) {
-							let token_expected =
-								format!("{:x}", md5::compute(format!("{}{}", plain_password, s)));
-							if token_expected == *t {
+				Box::pin(
+					async move {
+						let mut authenticated = false;
+						let mut use_playlists = true;
+						let mut use_favorites = true;
+
+						if let Some(ref db) = (db)
+							&& let Ok(Some((_, enc_password, up, uf, _))) =
+								db.get_user_details(&username).await
+							&& let Ok(plain_password) = crypto::decrypt_string(&enc_password)
+						{
+							use_playlists = up;
+							use_favorites = uf;
+							if let (Some(t), Some(s)) = (&t, &s) {
+								let token_expected = format!(
+									"{:x}",
+									md5::compute(format!("{}{}", plain_password, s))
+								);
+								if token_expected == *t {
+									authenticated = true;
+								}
+							} else if let Some(p) = &p
+								&& plain_password == *p
+							{
 								authenticated = true;
 							}
-						} else if let Some(p) = &p
-							&& plain_password == *p
-						{
-							authenticated = true;
 						}
-					}
 
-					if !authenticated {
-						let err = ErrorUnauthorized("Authentication required");
-						return Err(err);
-					}
+						if !authenticated {
+							tracing::warn!(username = %username, "Subsonic authentication failure");
+							let err = ErrorUnauthorized("Authentication required");
+							return Err(err);
+						}
 
-					if use_favorites
-						&& let Some(db) = &db
-						&& crate::tidal::favorites::LOCAL_FAVORITE_CACHE
+						if use_favorites
+							&& let Some(db) = &db && crate::tidal::favorites::LOCAL_FAVORITE_CACHE
 							.get(&username)
-							.is_none() && let Ok(favs) = db.get_all_local_favorites_map(&username).await
-					{
-						crate::tidal::favorites::set_local_favorites_map(&username, favs);
-					}
-
-					let tidal_api = if let Some(manager) = manager {
-						match manager.get_client_for_subsonic_user(&username).await {
-							Ok(session) => TidalApi::new(session),
-							Err(e) => {
-								let err = ErrorUnauthorized(e.to_string());
-								return Err(err);
-							}
+							.is_none() && let Ok(favs) =
+							db.get_all_local_favorites_map(&username).await
+						{
+							crate::tidal::favorites::set_local_favorites_map(&username, favs);
 						}
-					} else {
-						let err = ErrorUnauthorized("Tidal client manager not available");
-						return Err(err);
-					};
 
-					req.extensions_mut().insert(SubsonicContext {
-						user: username,
-						format,
-						tidal_api,
-						use_playlists,
-						use_favorites,
-					});
+						let tidal_api = if let Some(manager) = manager {
+							match manager.get_client_for_subsonic_user(&username).await {
+								Ok(session) => TidalApi::new(session),
+								Err(e) => {
+									let err = ErrorUnauthorized(e.to_string());
+									return Err(err);
+								}
+							}
+						} else {
+							let err = ErrorUnauthorized("Tidal client manager not available");
+							return Err(err);
+						};
 
-					service.call(req).await
-				})
+						req.extensions_mut().insert(SubsonicContext {
+							user: username,
+							format,
+							tidal_api,
+							use_playlists,
+							use_favorites,
+						});
+
+						service.call(req).await
+					}
+					.instrument(span),
+				)
 			}
 			Err(_) => Box::pin(async move {
 				let err = ErrorUnauthorized("Invalid request parameters");
 				Err(err)
 			}),
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use actix_web::{App, HttpResponse, test, web};
+
+	async fn dummy_handler() -> HttpResponse {
+		HttpResponse::Ok().body("OK")
+	}
+
+	#[actix_web::test]
+	async fn test_unauthenticated_request_missing_credentials() {
+		let app = test::init_service(
+			App::new()
+				.wrap(SubsonicAuth)
+				.route("/rest/getMusicFolders", web::get().to(dummy_handler)),
+		)
+		.await;
+
+		let req = test::TestRequest::get()
+			.uri("/rest/getMusicFolders")
+			.to_request();
+		let res = test::try_call_service(&app, req).await;
+		assert!(res.is_err());
+		let err = res.unwrap_err();
+		assert_eq!(
+			err.error_response().status(),
+			actix_web::http::StatusCode::UNAUTHORIZED
+		);
+	}
+
+	#[actix_web::test]
+	async fn test_malformed_credentials_does_not_leak_errors() {
+		let app = test::init_service(
+			App::new()
+				.wrap(SubsonicAuth)
+				.route("/rest/getMusicFolders", web::get().to(dummy_handler)),
+		)
+		.await;
+
+		let req = test::TestRequest::get()
+			.uri("/rest/getMusicFolders?u=invalid_user&p=invalid_pass&v=1.16.1&c=test")
+			.to_request();
+		let res = test::try_call_service(&app, req).await;
+		assert!(res.is_err());
+		let err = res.unwrap_err();
+		assert_eq!(
+			err.error_response().status(),
+			actix_web::http::StatusCode::UNAUTHORIZED
+		);
+
+		let err_str = err.to_string();
+		assert!(!err_str.contains("postgres"));
+		assert!(!err_str.contains("SELECT"));
+		assert!(!err_str.contains("sqlx"));
 	}
 }
