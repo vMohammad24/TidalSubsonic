@@ -6,7 +6,6 @@ use actix_web::{Responder, web};
 use serde::Deserialize;
 use serde_qs::actix::QsQuery;
 use std::collections::HashMap;
-use std::sync::Arc;
 
 #[derive(Deserialize)]
 pub struct SetRatingQuery {
@@ -26,7 +25,7 @@ pub async fn set_rating(query: web::Query<SetRatingQuery>) -> impl Responder {
 pub async fn scrobble(
 	req: actix_web::HttpRequest,
 	subsonic_ctx: actix_web::web::ReqData<crate::api::subsonic::middleware::SubsonicContext>,
-	db: web::Data<Arc<DbManager>>,
+	db: web::Data<DbManager>,
 ) -> impl Responder {
 	let mut ids = Vec::new();
 	let mut times = Vec::new();
@@ -168,7 +167,7 @@ pub async fn scrobble(
 
 pub async fn get_queue(
 	subsonic_ctx: actix_web::web::ReqData<crate::api::subsonic::middleware::SubsonicContext>,
-	db: web::Data<Arc<DbManager>>,
+	db: web::Data<DbManager>,
 ) -> impl Responder {
 	get_play_queue_impl(subsonic_ctx, db).await
 }
@@ -184,14 +183,14 @@ pub struct SavePlayQueueQuery {
 pub async fn save_queue(
 	query: QsQuery<SavePlayQueueQuery>,
 	subsonic_ctx: actix_web::web::ReqData<crate::api::subsonic::middleware::SubsonicContext>,
-	db: web::Data<Arc<DbManager>>,
+	db: web::Data<DbManager>,
 ) -> impl Responder {
 	save_play_queue_impl(query, subsonic_ctx, db).await
 }
 
 pub async fn get_play_queue(
 	subsonic_ctx: actix_web::web::ReqData<crate::api::subsonic::middleware::SubsonicContext>,
-	db: web::Data<Arc<DbManager>>,
+	db: web::Data<DbManager>,
 ) -> impl Responder {
 	get_play_queue_impl(subsonic_ctx, db).await
 }
@@ -199,7 +198,7 @@ pub async fn get_play_queue(
 pub async fn save_play_queue(
 	query: QsQuery<SavePlayQueueQuery>,
 	subsonic_ctx: actix_web::web::ReqData<crate::api::subsonic::middleware::SubsonicContext>,
-	db: web::Data<Arc<DbManager>>,
+	db: web::Data<DbManager>,
 ) -> impl Responder {
 	save_play_queue_impl(query, subsonic_ctx, db).await
 }
@@ -207,7 +206,7 @@ pub async fn save_play_queue(
 async fn save_play_queue_impl(
 	query: QsQuery<SavePlayQueueQuery>,
 	subsonic_ctx: actix_web::web::ReqData<crate::api::subsonic::middleware::SubsonicContext>,
-	db: web::Data<Arc<DbManager>>,
+	db: web::Data<DbManager>,
 ) -> impl Responder {
 	let q = query.into_inner();
 	let track_ids = q.id;
@@ -235,7 +234,7 @@ async fn save_play_queue_impl(
 
 async fn get_play_queue_impl(
 	subsonic_ctx: actix_web::web::ReqData<crate::api::subsonic::middleware::SubsonicContext>,
-	db: web::Data<Arc<DbManager>>,
+	db: web::Data<DbManager>,
 ) -> impl Responder {
 	let mut resp = SubsonicResponseWrapper::ok();
 	let ctx = subsonic_ctx.into_inner();

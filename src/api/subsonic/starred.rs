@@ -1,7 +1,6 @@
 use actix_web::{Responder, web};
 use futures_util::StreamExt;
 use serde::Deserialize;
-use std::sync::Arc;
 
 use crate::api::subsonic::models::SubsonicResponseWrapper;
 use crate::api::subsonic::response::SubsonicResponder;
@@ -10,7 +9,7 @@ use crate::db::DbManager;
 pub async fn get_starred(
 	req: actix_web::HttpRequest,
 	subsonic_ctx: actix_web::web::ReqData<crate::api::subsonic::middleware::SubsonicContext>,
-	db: web::Data<Arc<DbManager>>,
+	db: web::Data<DbManager>,
 ) -> impl Responder {
 	let mut resp = SubsonicResponseWrapper::ok();
 
@@ -209,7 +208,7 @@ pub struct StarQuery {
 pub async fn star(
 	query: web::Query<StarQuery>,
 	subsonic_ctx: actix_web::web::ReqData<crate::api::subsonic::middleware::SubsonicContext>,
-	db: web::Data<Arc<DbManager>>,
+	db: web::Data<DbManager>,
 ) -> impl Responder {
 	let id_parsed = query.id.as_ref().and_then(|id| id.parse::<i64>().ok());
 	let album_id_parsed = query
@@ -290,7 +289,7 @@ pub async fn star(
 pub async fn unstar(
 	query: web::Query<StarQuery>,
 	subsonic_ctx: actix_web::web::ReqData<crate::api::subsonic::middleware::SubsonicContext>,
-	db: web::Data<Arc<DbManager>>,
+	db: web::Data<DbManager>,
 ) -> impl Responder {
 	let id_parsed = query.id.as_ref().and_then(|id| id.parse::<i64>().ok());
 	let album_id_parsed = query

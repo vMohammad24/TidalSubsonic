@@ -343,7 +343,7 @@ struct CallbackQuery {
 
 async fn callback(
 	query: web::Query<CallbackQuery>,
-	manager: web::Data<Arc<TidalClientManager>>,
+	manager: web::Data<TidalClientManager>,
 	store: web::Data<TokenStore>,
 ) -> impl Responder {
 	let q = query.into_inner();
@@ -458,7 +458,7 @@ async fn link_form(
 	req: HttpRequest,
 	session: Session,
 	store: web::Data<TokenStore>,
-	manager: web::Data<Arc<TidalClientManager>>,
+	manager: web::Data<TidalClientManager>,
 ) -> impl Responder {
 	let form = form.into_inner();
 	let Some(tidal_user_id) = extract_user_id(&req, &manager).await else {

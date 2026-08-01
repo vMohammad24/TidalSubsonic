@@ -4,12 +4,10 @@ use async_zip::{Compression, ZipEntryBuilder};
 use base64::{Engine as _, engine::general_purpose};
 use futures_util::AsyncWriteExt;
 use serde::Deserialize;
-use std::sync::Arc;
 use tokio_util::io::ReaderStream;
 
 use crate::api::subsonic::models::SubsonicResponseWrapper;
 use crate::api::subsonic::response::SubsonicResponder;
-use crate::tidal::manager::TidalClientManager;
 use crate::tidal::models::PlaybackInfo;
 use crate::util::http_client;
 
@@ -24,7 +22,6 @@ pub struct GetCoverArtQuery {
 
 pub async fn get_cover_art(
 	query: web::Query<GetCoverArtQuery>,
-	_manager: web::Data<Arc<TidalClientManager>>,
 	req: actix_web::HttpRequest,
 ) -> impl Responder {
 	let id = &query.id;

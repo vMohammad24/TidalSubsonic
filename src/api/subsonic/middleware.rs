@@ -99,11 +99,11 @@ where
 				};
 
 				let db = req
-					.app_data::<web::Data<Arc<DbManager>>>()
-					.map(|d| Arc::clone(d.get_ref()));
+					.app_data::<web::Data<DbManager>>()
+					.map(|d| d.get_ref().clone());
 				let manager = req
-					.app_data::<web::Data<Arc<TidalClientManager>>>()
-					.map(|d| Arc::clone(d.get_ref()));
+					.app_data::<web::Data<TidalClientManager>>()
+					.map(|d| d.get_ref().clone());
 
 				if path.ends_with("/getCoverArt.view")
 					|| path.ends_with("/getCoverArt")

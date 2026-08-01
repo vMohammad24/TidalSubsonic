@@ -2,7 +2,6 @@ use actix_session::Session;
 use actix_web::{HttpRequest, HttpResponse, Responder, web};
 use askama::Template;
 use serde::Deserialize;
-use std::sync::Arc;
 
 use crate::tidal::manager::TidalClientManager;
 use crate::util::crypto;
@@ -116,7 +115,7 @@ pub async fn home(
 	query: web::Query<HomeQuery>,
 	req: HttpRequest,
 	session: Session,
-	manager: web::Data<Arc<TidalClientManager>>,
+	manager: web::Data<TidalClientManager>,
 ) -> impl Responder {
 	let mut is_authenticated = false;
 	let mut tidal_username = "".to_string();
@@ -179,7 +178,7 @@ async fn create_user_form(
 	form: web::Form<CreateUserForm>,
 	req: HttpRequest,
 	session: Session,
-	manager: web::Data<Arc<TidalClientManager>>,
+	manager: web::Data<TidalClientManager>,
 ) -> impl Responder {
 	let Some(tidal_user_id) = extract_user_id(&req, &manager).await else {
 		return HttpResponse::Unauthorized().finish();
@@ -224,7 +223,7 @@ async fn delete_user_form(
 	form: web::Form<DeleteUserForm>,
 	req: HttpRequest,
 	session: Session,
-	manager: web::Data<Arc<TidalClientManager>>,
+	manager: web::Data<TidalClientManager>,
 ) -> impl Responder {
 	let Some(tidal_user_id) = extract_user_id(&req, &manager).await else {
 		return HttpResponse::Unauthorized().finish();
@@ -249,7 +248,7 @@ async fn update_features_form(
 	form: web::Form<UpdateFeaturesForm>,
 	req: HttpRequest,
 	session: Session,
-	manager: web::Data<Arc<TidalClientManager>>,
+	manager: web::Data<TidalClientManager>,
 ) -> impl Responder {
 	let Some(tidal_user_id) = extract_user_id(&req, &manager).await else {
 		return HttpResponse::Unauthorized().finish();

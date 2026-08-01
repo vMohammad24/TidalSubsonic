@@ -11,7 +11,6 @@ use futures_util::{StreamExt, stream};
 use rand::seq::IteratorRandom;
 use regex::Regex;
 use serde::Deserialize;
-use std::sync::Arc;
 
 #[derive(Deserialize)]
 pub struct IdQuery {
@@ -409,7 +408,7 @@ pub struct AlbumListQuery {
 pub async fn get_album_list(
 	list_query: web::Query<AlbumListQuery>,
 	req: actix_web::HttpRequest,
-	manager: web::Data<Arc<TidalClientManager>>,
+	manager: web::Data<TidalClientManager>,
 	subsonic_ctx: actix_web::web::ReqData<SubsonicContext>,
 ) -> impl Responder {
 	let api = &subsonic_ctx.tidal_api;
@@ -522,7 +521,7 @@ use crate::api::subsonic::response::ApiResult;
 
 pub async fn get_album(
 	query: web::Query<IdQuery>,
-	_manager: web::Data<Arc<TidalClientManager>>,
+	_manager: web::Data<TidalClientManager>,
 	subsonic_ctx: actix_web::web::ReqData<SubsonicContext>,
 ) -> ApiResult {
 	ApiResult::from_result(
@@ -564,7 +563,7 @@ pub async fn get_album(
 
 pub async fn get_artist(
 	query: web::Query<IdQuery>,
-	_manager: web::Data<Arc<TidalClientManager>>,
+	_manager: web::Data<TidalClientManager>,
 	subsonic_ctx: actix_web::web::ReqData<SubsonicContext>,
 ) -> ApiResult {
 	ApiResult::from_result(
@@ -609,7 +608,6 @@ pub async fn get_artist(
 
 pub async fn get_song(
 	query: web::Query<IdQuery>,
-	_manager: web::Data<Arc<TidalClientManager>>,
 	subsonic_ctx: actix_web::web::ReqData<SubsonicContext>,
 ) -> ApiResult {
 	ApiResult::from_result(

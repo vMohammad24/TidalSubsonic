@@ -21,7 +21,7 @@ pub struct CreatePlaylistQuery {
 pub async fn create_playlist(
 	query: QsQuery<CreatePlaylistQuery>,
 	subsonic_ctx: actix_web::web::ReqData<crate::api::subsonic::middleware::SubsonicContext>,
-	db: web::Data<Arc<crate::db::DbManager>>,
+	db: web::Data<crate::db::DbManager>,
 ) -> impl Responder {
 	let mut resp = SubsonicResponseWrapper::ok();
 
@@ -80,7 +80,7 @@ pub struct DeletePlaylistQuery {
 pub async fn delete_playlist(
 	query: QsQuery<DeletePlaylistQuery>,
 	subsonic_ctx: actix_web::web::ReqData<crate::api::subsonic::middleware::SubsonicContext>,
-	db: web::Data<Arc<crate::db::DbManager>>,
+	db: web::Data<crate::db::DbManager>,
 ) -> impl Responder {
 	if subsonic_ctx.use_playlists {
 		let id = match Uuid::parse_str(&query.id) {
@@ -127,7 +127,7 @@ pub struct UpdatePlaylistQuery {
 pub async fn update_playlist(
 	query: QsQuery<UpdatePlaylistQuery>,
 	subsonic_ctx: actix_web::web::ReqData<crate::api::subsonic::middleware::SubsonicContext>,
-	db: web::Data<Arc<crate::db::DbManager>>,
+	db: web::Data<crate::db::DbManager>,
 ) -> impl Responder {
 	let api = &subsonic_ctx.tidal_api;
 	let desc = query.description.as_ref().or(query.comment.as_ref());
@@ -196,8 +196,7 @@ use crate::api::subsonic::mapping::{
 	map_local_playlist_to_subsonic, map_tidal_playlist_to_subsonic, map_tidal_track_to_subsonic,
 };
 use crate::api::subsonic::models::{Playlist as SubsonicPlaylist, Playlists};
-use futures_util::{StreamExt, future::join_all};
-use std::sync::Arc;
+use futures_util::future::join_all;
 use uuid::Uuid;
 
 #[derive(Deserialize)]
@@ -207,7 +206,7 @@ pub struct GetPlaylistQuery {
 
 pub async fn get_playlists(
 	subsonic_ctx: actix_web::web::ReqData<crate::api::subsonic::middleware::SubsonicContext>,
-	db: web::Data<Arc<crate::db::DbManager>>,
+	db: web::Data<crate::db::DbManager>,
 ) -> impl Responder {
 	let mut resp = SubsonicResponseWrapper::ok();
 	let api = &subsonic_ctx.tidal_api;
@@ -262,7 +261,7 @@ pub async fn get_playlists(
 pub async fn get_playlist(
 	query: QsQuery<GetPlaylistQuery>,
 	subsonic_ctx: actix_web::web::ReqData<crate::api::subsonic::middleware::SubsonicContext>,
-	db: web::Data<Arc<crate::db::DbManager>>,
+	db: web::Data<crate::db::DbManager>,
 ) -> impl Responder {
 	let mut resp = SubsonicResponseWrapper::ok();
 	let api = &subsonic_ctx.tidal_api;

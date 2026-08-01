@@ -100,7 +100,7 @@ static CREATE_USER_LIMITER: LazyLock<RateLimiter> = LazyLock::new(|| RateLimiter
 async fn create_user(
 	req_body: web::Json<CreateUserReq>,
 	req: HttpRequest,
-	manager: web::Data<Arc<TidalClientManager>>,
+	manager: web::Data<TidalClientManager>,
 ) -> impl Responder {
 	let client_ip = req
 		.connection_info()
@@ -167,7 +167,7 @@ async fn create_user(
 async fn update_features(
 	req_body: web::Json<UpdateFeaturesReq>,
 	req: HttpRequest,
-	manager: web::Data<Arc<TidalClientManager>>,
+	manager: web::Data<TidalClientManager>,
 ) -> impl Responder {
 	let Some(tidal_user_id) = extract_user_id(&req, &manager).await else {
 		return HttpResponse::Unauthorized()
@@ -217,7 +217,7 @@ async fn update_features(
 async fn delete_user(
 	req_body: web::Json<DeleteUserReq>,
 	req: HttpRequest,
-	manager: web::Data<Arc<TidalClientManager>>,
+	manager: web::Data<TidalClientManager>,
 ) -> impl Responder {
 	let Some(tidal_user_id) = extract_user_id(&req, &manager).await else {
 		return HttpResponse::Unauthorized()

@@ -63,7 +63,7 @@ static DATA_LIMITER: LazyLock<RateLimiter> = LazyLock::new(|| RateLimiter::new(2
 
 async fn initiate_login(
 	req: HttpRequest,
-	manager: web::Data<Arc<TidalClientManager>>,
+	manager: web::Data<TidalClientManager>,
 	store: web::Data<DeviceAuthStore>,
 ) -> impl Responder {
 	let client_ip = req
@@ -142,7 +142,7 @@ struct AuthStatusQuery {
 
 async fn check_auth_status(
 	query: web::Query<AuthStatusQuery>,
-	manager: web::Data<Arc<TidalClientManager>>,
+	manager: web::Data<TidalClientManager>,
 	store: web::Data<DeviceAuthStore>,
 ) -> impl Responder {
 	let q = query.into_inner();
@@ -346,7 +346,7 @@ async fn logout(req: HttpRequest, db: web::Data<Arc<DbManager>>) -> impl Respond
 
 async fn delete_account(
 	req: HttpRequest,
-	manager: web::Data<Arc<TidalClientManager>>,
+	manager: web::Data<TidalClientManager>,
 ) -> impl Responder {
 	let cookie_value = req
 		.cookie("tidal_subsonic_wsid")
@@ -375,10 +375,7 @@ async fn delete_account(
 		.finish()
 }
 
-async fn request_data(
-	req: HttpRequest,
-	manager: web::Data<Arc<TidalClientManager>>,
-) -> impl Responder {
+async fn request_data(req: HttpRequest, manager: web::Data<TidalClientManager>) -> impl Responder {
 	let client_ip = req
 		.connection_info()
 		.realip_remote_addr()
