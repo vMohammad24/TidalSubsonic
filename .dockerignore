@@ -1,0 +1,10 @@
+.git
+.git.backup
+.github
+.env
+.env.example
+target
+flake.nix
+flake.lock
+*.md
+LICENSE
