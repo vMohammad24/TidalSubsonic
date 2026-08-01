@@ -31,20 +31,43 @@ pub fn get_local_favorite_date(username: &str, item_id: i64) -> Option<String> {
 		.and_then(|favs| favs.read().ok()?.get(&item_id).cloned())
 }
 
-pub fn add_favorite(user_id: i64, item_id: i64, created: String) {
-	let user_favorites = FAVORITE_CACHE.get_with(user_id, || Arc::new(RwLock::new(HashMap::new())));
+fn insert_into_cache<K: std::hash::Hash + Eq + Send + Sync + 'static>(
+	cache: &Cache<K, ItemFavorites>,
+	key: K,
+	item_id: i64,
+	created: String,
+) {
+	let user_favorites = cache.get_with(key, || Arc::new(RwLock::new(HashMap::new())));
 	if let Ok(mut guard) = user_favorites.write() {
 		guard.insert(item_id, created);
 	}
 }
 
-pub fn add_local_favorite(username: &str, item_id: i64, created: String) {
-	let user_favorites = LOCAL_FAVORITE_CACHE.get_with(username.to_string(), || {
-		Arc::new(RwLock::new(HashMap::new()))
-	});
-	if let Ok(mut guard) = user_favorites.write() {
-		guard.insert(item_id, created);
+fn remove_from_cache<K: std::hash::Hash + Eq + Send + Sync + std::borrow::Borrow<Q> + 'static, Q>(
+	cache: &Cache<K, ItemFavorites>,
+	key: &Q,
+	item_id: i64,
+) where
+	Q: std::hash::Hash + Eq + ?Sized,
+{
+	if let Some(user_favorites) = cache.get(key)
+		&& let Ok(mut guard) = user_favorites.write()
+	{
+		guard.remove(&item_id);
 	}
+}
+
+pub fn add_favorite(user_id: i64, item_id: i64, created: String) {
+	insert_into_cache(&FAVORITE_CACHE, user_id, item_id, created);
+}
+
+pub fn add_local_favorite(username: &str, item_id: i64, created: String) {
+	insert_into_cache(
+		&LOCAL_FAVORITE_CACHE,
+		username.to_string(),
+		item_id,
+		created,
+	);
 }
 
 pub fn set_favorites_map(user_id: i64, favorites: HashMap<i64, String>) {
@@ -66,19 +89,11 @@ pub fn set_local_favorites_map(username: &str, favorites: HashMap<i64, String>) 
 }
 
 pub fn remove_favorite(user_id: i64, item_id: i64) {
-	if let Some(user_favorites) = FAVORITE_CACHE.get(&user_id)
-		&& let Ok(mut guard) = user_favorites.write()
-	{
-		guard.remove(&item_id);
-	}
+	remove_from_cache(&FAVORITE_CACHE, &user_id, item_id);
 }
 
 pub fn remove_local_favorite(username: &str, item_id: i64) {
-	if let Some(user_favorites) = LOCAL_FAVORITE_CACHE.get(username)
-		&& let Ok(mut guard) = user_favorites.write()
-	{
-		guard.remove(&item_id);
-	}
+	remove_from_cache(&LOCAL_FAVORITE_CACHE, username, item_id);
 }
 
 pub fn get_favorites_count(user_id: i64) -> usize {
