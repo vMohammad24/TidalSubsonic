@@ -258,57 +258,84 @@ impl Session {
 
 		let url = format!("{}{}", base_url, path);
 
-		let res = self
-			.send_request_inner(method.clone(), &url, api_version, query, form, json.clone())
-			.await?;
-		let status = res.status();
+		let mut retries = 0;
+		let max_retries = 2;
+		let mut backoff = std::time::Duration::from_millis(200);
+		let mut refreshed_token = false;
 
-		if status == reqwest::StatusCode::UNAUTHORIZED && use_oauth {
-			let _ = self.refresh_access_token().await?;
-			let res2 = self
-				.send_request_inner(method, &url, api_version, query, form, json)
-				.await?;
-			let status2 = res2.status();
-			if !status2.is_success() {
-				let text = res2.text().await.unwrap_or_default();
-				return Err(TidalError::ApiError(status2.as_u16(), text));
+		loop {
+			let request_fut = self.send_request_inner(
+				method.clone(),
+				&url,
+				api_version,
+				query,
+				form,
+				json.clone(),
+			);
+
+			match tokio::time::timeout(std::time::Duration::from_secs(15), request_fut).await {
+				Ok(Ok(res)) => {
+					let status = res.status();
+
+					if status == reqwest::StatusCode::UNAUTHORIZED && use_oauth && !refreshed_token
+					{
+						refreshed_token = true;
+						let _ = self.refresh_access_token().await?;
+						continue;
+					}
+
+					if (status == reqwest::StatusCode::TOO_MANY_REQUESTS
+						|| status.is_server_error())
+						&& retries < max_retries
+					{
+						retries += 1;
+						tokio::time::sleep(backoff).await;
+						backoff *= 2;
+						continue;
+					}
+
+					if !status.is_success() {
+						if status == reqwest::StatusCode::UNAUTHORIZED {
+							return Err(TidalError::Authentication(
+								"Invalid or expired token".to_string(),
+							));
+						}
+						if status == reqwest::StatusCode::NOT_FOUND {
+							return Err(TidalError::ResourceNotFound(
+								path.to_string(),
+								"unknown".to_string(),
+							));
+						}
+						if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+							return Err(TidalError::RateLimit);
+						}
+						if status == reqwest::StatusCode::PAYMENT_REQUIRED {
+							return Err(TidalError::PaymentRequired);
+						}
+
+						let text = res.text().await.unwrap_or_default();
+						return Err(TidalError::ApiError(status.as_u16(), text));
+					}
+
+					let text = res.text().await.unwrap_or_default();
+					if text.is_empty() && std::any::type_name::<T>() == "()" {
+						return serde_json::from_str("null").map_err(Into::into);
+					}
+
+					return serde_json::from_str(&text).map_err(Into::into);
+				}
+				Ok(Err(e)) => return Err(e),
+				Err(_) => {
+					if retries < max_retries {
+						retries += 1;
+						tokio::time::sleep(backoff).await;
+						backoff *= 2;
+						continue;
+					}
+					return Err(TidalError::Unexpected("Upstream request timed out".into()));
+				}
 			}
-			let text = res2.text().await.unwrap_or_default();
-			if text.is_empty() && std::any::type_name::<T>() == "()" {
-				return serde_json::from_str("null").map_err(Into::into);
-			}
-			return serde_json::from_str(&text).map_err(Into::into);
 		}
-
-		if !status.is_success() {
-			if status == reqwest::StatusCode::UNAUTHORIZED {
-				return Err(TidalError::Authentication(
-					"Invalid or expired token".to_string(),
-				));
-			}
-			if status == reqwest::StatusCode::NOT_FOUND {
-				return Err(TidalError::ResourceNotFound(
-					path.to_string(),
-					"unknown".to_string(),
-				));
-			}
-			if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-				return Err(TidalError::RateLimit);
-			}
-			if status == reqwest::StatusCode::PAYMENT_REQUIRED {
-				return Err(TidalError::PaymentRequired);
-			}
-
-			let text = res.text().await.unwrap_or_default();
-			return Err(TidalError::ApiError(status.as_u16(), text));
-		}
-
-		let text = res.text().await.unwrap_or_default();
-		if text.is_empty() && std::any::type_name::<T>() == "()" {
-			return serde_json::from_str("null").map_err(Into::into);
-		}
-
-		serde_json::from_str(&text).map_err(Into::into)
 	}
 
 	pub async fn refresh_access_token(&self) -> Result<TokenResponse, TidalError> {
