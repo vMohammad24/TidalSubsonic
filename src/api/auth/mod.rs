@@ -105,13 +105,7 @@ async fn initiate_login(
 				expires_in_minutes: device_auth.expires_in / 60,
 				error: None,
 			};
-			match template.render() {
-				Ok(html) => HttpResponse::Ok().content_type("text/html").body(html),
-				Err(e) => {
-					tracing::error!("Template error: {}", e);
-					HttpResponse::InternalServerError().body("Internal Server Error")
-				}
-			}
+			render_login_template(template)
 		}
 		Err(e) => {
 			tracing::error!(error = %e, "Failed to start authorization");
@@ -123,13 +117,17 @@ async fn initiate_login(
 				expires_in_minutes: 0,
 				error: Some(format!("Failed to start authorization: {}", e)),
 			};
-			match template.render() {
-				Ok(html) => HttpResponse::Ok().content_type("text/html").body(html),
-				Err(e) => {
-					tracing::error!("Template error: {}", e);
-					HttpResponse::InternalServerError().body("Internal Server Error")
-				}
-			}
+			render_login_template(template)
+		}
+	}
+}
+
+fn render_login_template(template: LoginTemplate) -> HttpResponse {
+	match template.render() {
+		Ok(html) => HttpResponse::Ok().content_type("text/html").body(html),
+		Err(e) => {
+			tracing::error!("Template error: {}", e);
+			HttpResponse::InternalServerError().body("Internal Server Error")
 		}
 	}
 }
@@ -313,15 +311,27 @@ async fn check_auth_status(
 				"error": msg
 			}))
 		}
-		Err(e) => HttpResponse::Ok().json(serde_json::json!({
-			"status": "error",
-			"message": "Server error checking authorization status",
-			"details": e.to_string()
-		})),
+		Err(e) => {
+			tracing::error!(error = %e, "Server error checking authorization status");
+			HttpResponse::Ok().json(serde_json::json!({
+				"status": "error",
+				"message": "An internal server error occurred while verifying authorization status."
+			}))
+		}
 	}
 }
 
-async fn logout(req: HttpRequest, db: web::Data<Arc<DbManager>>) -> impl Responder {
+fn clear_session_cookie() -> actix_web::cookie::Cookie<'static> {
+	actix_web::cookie::Cookie::build("tidal_subsonic_wsid", "")
+		.path("/")
+		.http_only(true)
+		.secure(true)
+		.same_site(actix_web::cookie::SameSite::Strict)
+		.max_age(actix_web::cookie::time::Duration::ZERO)
+		.finish()
+}
+
+async fn logout(req: HttpRequest, db: web::Data<DbManager>) -> impl Responder {
 	let cookie_value = req
 		.cookie("tidal_subsonic_wsid")
 		.map(|c| c.value().to_string());
@@ -331,15 +341,7 @@ async fn logout(req: HttpRequest, db: web::Data<Arc<DbManager>>) -> impl Respond
 		tracing::error!("Failed to delete web session {}: {}", session_id, e);
 	}
 	HttpResponse::Found()
-		.cookie(
-			actix_web::cookie::Cookie::build("tidal_subsonic_wsid", "")
-				.path("/")
-				.http_only(true)
-				.secure(true)
-				.same_site(actix_web::cookie::SameSite::Strict)
-				.max_age(actix_web::cookie::time::Duration::ZERO)
-				.finish(),
-		)
+		.cookie(clear_session_cookie())
 		.append_header(("Location", "/?logged_out=true"))
 		.finish()
 }
@@ -362,15 +364,7 @@ async fn delete_account(
 	}
 
 	HttpResponse::Found()
-		.cookie(
-			actix_web::cookie::Cookie::build("tidal_subsonic_wsid", "")
-				.path("/")
-				.http_only(true)
-				.secure(true)
-				.same_site(actix_web::cookie::SameSite::Strict)
-				.max_age(actix_web::cookie::time::Duration::ZERO)
-				.finish(),
-		)
+		.cookie(clear_session_cookie())
 		.append_header(("Location", "/?account_deleted=true"))
 		.finish()
 }
