@@ -51,29 +51,39 @@ pub async fn extract_user_id(req: &HttpRequest, manager: &TidalClientManager) ->
 }
 
 pub async fn get_users_info(tidal_user_id: &str, db: &DbManager) -> Vec<UserInfo> {
-	let mut users = Vec::new();
-	if let Ok(usernames) = db.list_users_for_tidal_account(tidal_user_id).await {
-		for u in usernames {
-			if let Ok(Some((_, _, use_playlists, use_favorites, use_event_batch))) =
-				db.get_user_details(&u).await
-			{
-				let lastfm_username = db
-					.get_lastfm_details(&u)
-					.await
-					.ok()
-					.flatten()
-					.map(|(_, name)| name);
-				let scrobbles = db.get_scrobble_count(&u).await.ok().flatten().unwrap_or(0);
-				users.push(UserInfo {
-					username: u,
-					lastfm_username,
-					use_playlists,
-					use_favorites,
-					use_event_batch,
-					scrobbles,
-				});
-			}
-		}
-	}
-	users
+	let rows = sqlx::query!(
+		r#"
+		SELECT 
+			u.username,
+			u.use_playlists as "use_playlists!",
+			u.use_favorites as "use_favorites!",
+			u.use_event_batch as "use_event_batch!",
+			l.lastfm_username,
+			COALESCE(s.scrobble_count, 0) as "scrobbles!"
+		FROM subsonic_users u
+		LEFT JOIN user_lastfm_links l ON u.username = l.subsonic_username
+		LEFT JOIN (
+			SELECT username, COUNT(*) as scrobble_count
+			FROM scrobbles
+			WHERE submission = true
+			GROUP BY username
+		) s ON u.username = s.username
+		WHERE u.tidal_user_id = $1
+		"#,
+		tidal_user_id
+	)
+	.fetch_all(&db.pool)
+	.await
+	.unwrap_or_default();
+
+	rows.into_iter()
+		.map(|r| UserInfo {
+			username: r.username,
+			lastfm_username: r.lastfm_username,
+			use_playlists: r.use_playlists,
+			use_favorites: r.use_favorites,
+			use_event_batch: r.use_event_batch,
+			scrobbles: r.scrobbles,
+		})
+		.collect()
 }
