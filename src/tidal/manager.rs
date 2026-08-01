@@ -13,6 +13,7 @@ use chrono::{TimeZone, Utc};
 use moka::future::Cache;
 use tokio::sync::mpsc::{Sender, channel};
 
+#[derive(Clone)]
 pub struct TidalClientManager {
 	user_clients: Arc<RwLock<HashMap<String, Arc<Session>>>>,
 	global_client: Arc<Session>,
@@ -22,33 +23,37 @@ pub struct TidalClientManager {
 	subsonic_user_cache: Cache<String, Arc<Session>>,
 }
 
+use tokio_util::sync::CancellationToken;
+
 impl TidalClientManager {
-	pub fn new(default_country_code: &str, db: Arc<DbManager>) -> Self {
+	pub fn new(
+		default_country_code: &str,
+		db: Arc<DbManager>,
+		cancel_token: CancellationToken,
+	) -> (Self, tokio::task::JoinHandle<()>) {
 		let (tx, mut rx) = channel::<TokenUpdate>(100);
 		let db_clone = db.clone();
 
-		tokio::spawn(async move {
-			while let Some(update) = rx.recv().await {
-				let user_id_str = update.user_id.to_string();
-				let encrypted_access = encrypt_string(&update.access_token).ok();
-				let encrypted_refresh = update
-					.refresh_token
-					.as_ref()
-					.and_then(|t| encrypt_string(t).ok());
-
-				let _ = db_clone
-					.save_tokens(
-						&user_id_str,
-						crate::db::StoredTokens {
-							access_token: encrypted_access,
-							refresh_token: encrypted_refresh,
-							token_expiry: update
-								.token_expiry
-								.and_then(|ts| Utc.timestamp_opt(ts as i64, 0).single()),
-							last_data_request: None,
-						},
-					)
-					.await;
+		let handle = tokio::spawn(async move {
+			loop {
+				tokio::select! {
+					_ = cancel_token.cancelled() => {
+						tracing::info!("Shutdown signal received: draining remaining token updates...");
+						rx.close();
+						while let Some(update) = rx.recv().await {
+							let _ = Self::persist_token_update(&db_clone, update).await;
+						}
+						break;
+					}
+					maybe_update = rx.recv() => {
+						match maybe_update {
+							Some(update) => {
+								let _ = Self::persist_token_update(&db_clone, update).await;
+							}
+							None => break,
+						}
+					}
+				}
 			}
 		});
 
@@ -57,17 +62,42 @@ impl TidalClientManager {
 			..Default::default()
 		};
 
-		Self {
-			user_clients: Arc::new(RwLock::new(HashMap::new())),
-			global_client: Arc::new(Session::new(global_options, Some(tx.clone()))),
-			default_country_code: default_country_code.to_string(),
-			db,
-			token_update_tx: tx,
-			subsonic_user_cache: Cache::builder()
-				.time_to_live(Duration::from_secs(300))
-				.max_capacity(1000)
-				.build(),
-		}
+		(
+			Self {
+				user_clients: Arc::new(RwLock::new(HashMap::new())),
+				global_client: Arc::new(Session::new(global_options, Some(tx.clone()))),
+				default_country_code: default_country_code.to_string(),
+				db,
+				token_update_tx: tx,
+				subsonic_user_cache: Cache::builder()
+					.time_to_live(Duration::from_secs(300))
+					.max_capacity(1000)
+					.build(),
+			},
+			handle,
+		)
+	}
+
+	async fn persist_token_update(db: &DbManager, update: TokenUpdate) -> Result<(), sqlx::Error> {
+		let user_id_str = update.user_id.to_string();
+		let encrypted_access = encrypt_string(&update.access_token).ok();
+		let encrypted_refresh = update
+			.refresh_token
+			.as_ref()
+			.and_then(|t| encrypt_string(t).ok());
+
+		db.save_tokens(
+			&user_id_str,
+			crate::db::StoredTokens {
+				access_token: encrypted_access,
+				refresh_token: encrypted_refresh,
+				token_expiry: update
+					.token_expiry
+					.and_then(|ts| Utc.timestamp_opt(ts as i64, 0).single()),
+				last_data_request: None,
+			},
+		)
+		.await
 	}
 
 	pub fn get_global_client(&self) -> Arc<Session> {
@@ -147,9 +177,10 @@ impl TidalClientManager {
 		let client = Arc::new(session);
 
 		let mut clients_write = self.user_clients.write().await;
-		clients_write.insert(tidal_user_id.to_string(), Arc::clone(&client));
-
-		Ok(client)
+		Ok(clients_write
+			.entry(tidal_user_id.to_string())
+			.or_insert(client)
+			.clone())
 	}
 
 	pub async fn save_tokens_for_tidal_user(
@@ -180,6 +211,13 @@ impl TidalClientManager {
 	pub async fn clear_tokens_for_tidal_user(&self, tidal_user_id: &str) -> Result<(), TidalError> {
 		let mut clients = self.user_clients.write().await;
 		clients.remove(tidal_user_id);
+
+		if let Ok(users) = self.db.list_users_for_tidal_account(tidal_user_id).await {
+			for u in users {
+				self.subsonic_user_cache.invalidate(&u).await;
+			}
+		}
+
 		self.db
 			.delete_tokens(tidal_user_id)
 			.await

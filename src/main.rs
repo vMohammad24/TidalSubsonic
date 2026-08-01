@@ -6,6 +6,7 @@ use dotenvy::dotenv;
 use sha2::{Digest, Sha512};
 use std::env;
 use std::sync::Arc;
+use tokio_util::sync::CancellationToken;
 use tracing::{Level, info};
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
@@ -42,9 +43,6 @@ async fn main() -> std::io::Result<()> {
 			tracing::warn!("Tidal credentials warning: {}", e);
 		}
 	}
-
-	let database_url = env::var("DATABASE_URL")
-		.unwrap_or_else(|_| "postgres://postgres:postgres@localhost:5432/tss".to_string());
 
 	info!("Connecting to database...");
 	let db_manager = match db::DbManager::new(&app_config.database_url).await {
@@ -87,17 +85,29 @@ async fn main() -> std::io::Result<()> {
 		}
 	};
 
-	let default_country_code =
-		env::var("DEFAULT_COUNTRY_CODE").unwrap_or_else(|_| "US".to_string());
-	let tidal_manager = Arc::new(tidal::manager::TidalClientManager::new(
-		&default_country_code,
-		db_manager.clone(),
-	));
+	let cancel_token = CancellationToken::new();
+	let (tidal_manager, token_drain_handle) = tidal::manager::TidalClientManager::new(
+		&app_config.default_country_code,
+		Arc::new(db_manager.clone()),
+		cancel_token.clone(),
+	);
 
 	let bind_addr = format!("{}:{}", app_config.host, app_config.port);
 	info!("Starting server on {}", bind_addr);
 
-	HttpServer::new(move || {
+	let cancel_token_clone = cancel_token.clone();
+	tokio::spawn(async move {
+		if let Ok(()) = tokio::signal::ctrl_c().await {
+			info!("Ctrl+C signal received, triggering shutdown token...");
+			cancel_token_clone.cancel();
+		}
+	});
+
+	let app_config_data = web::Data::new(app_config);
+	let tidal_manager_data = web::Data::new(tidal_manager);
+	let db_manager_data = web::Data::new(db_manager);
+
+	let server_res = HttpServer::new(move || {
 		App::new()
 			.wrap(SessionMiddleware::new(
 				CookieSessionStore::default(),
@@ -116,5 +126,10 @@ async fn main() -> std::io::Result<()> {
 	.shutdown_timeout(30)
 	.bind(bind_addr)?
 	.run()
-	.await
+	.await;
+
+	cancel_token.cancel();
+	let _ = token_drain_handle.await;
+
+	server_res
 }
