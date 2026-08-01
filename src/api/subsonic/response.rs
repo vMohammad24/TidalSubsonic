@@ -43,8 +43,7 @@ impl Responder for ApiResult {
 fn strip_at_prefix(val: &mut serde_json::Value) {
 	match val {
 		serde_json::Value::Object(map) => {
-			let needs_stripping = map.keys().any(|k| k.starts_with('@'));
-			if needs_stripping {
+			if map.keys().any(|k| k.starts_with('@')) {
 				let old_map = std::mem::take(map);
 				for (mut k, mut v) in old_map {
 					strip_at_prefix(&mut v);
