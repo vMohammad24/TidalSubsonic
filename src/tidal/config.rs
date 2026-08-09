@@ -28,6 +28,7 @@ pub static CLIENT_SECRET: LazyLock<&'static str> = LazyLock::new(|| {
 		.leak()
 });
 
+#[derive(Debug)]
 pub struct TidalCredentials {
 	pub api_token: String,
 	pub client_id: String,
@@ -50,5 +51,31 @@ impl TidalCredentials {
 			client_id: env::var("TIDAL_CLIENT_ID").unwrap(),
 			client_secret: env::var("TIDAL_CLIENT_SECRET").unwrap(),
 		})
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn test_tidal_credentials_from_env() {
+		dotenvy::dotenv().ok();
+		let result = TidalCredentials::from_env();
+		let has_all_vars = env::var("TIDAL_API_TOKEN").is_ok()
+			&& env::var("TIDAL_CLIENT_ID").is_ok()
+			&& env::var("TIDAL_CLIENT_SECRET").is_ok();
+
+		if has_all_vars {
+			assert!(result.is_ok(), "Expected valid credentials from env");
+			let creds = result.unwrap();
+			assert!(!creds.api_token.is_empty());
+			assert!(!creds.client_id.is_empty());
+			assert!(!creds.client_secret.is_empty());
+		} else {
+			assert!(result.is_err(), "Expected error when env vars are missing");
+			let err_msg = result.unwrap_err();
+			assert!(err_msg.contains("Missing env vars"));
+		}
 	}
 }

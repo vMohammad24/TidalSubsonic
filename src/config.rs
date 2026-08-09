@@ -44,3 +44,17 @@ impl AppConfig {
 		}
 	}
 }
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn test_app_config_from_env_defaults() {
+		let config = AppConfig::from_env();
+		assert!(!config.host.is_empty());
+		assert!(config.port > 0);
+		assert!(!config.default_country_code.is_empty());
+		assert!(config.request_timeout_secs > 0);
+	}
+}

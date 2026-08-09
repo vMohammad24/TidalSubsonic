@@ -53,7 +53,7 @@ pub async fn extract_user_id(req: &HttpRequest, manager: &TidalClientManager) ->
 pub async fn get_users_info(tidal_user_id: &str, db: &DbManager) -> Vec<UserInfo> {
 	let rows = sqlx::query!(
 		r#"
-		SELECT 
+		SELECT
 			u.username,
 			u.use_playlists as "use_playlists!",
 			u.use_favorites as "use_favorites!",
@@ -86,4 +86,36 @@ pub async fn get_users_info(tidal_user_id: &str, db: &DbManager) -> Vec<UserInfo
 			scrobbles: r.scrobbles,
 		})
 		.collect()
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use actix_session::SessionExt;
+	use actix_web::test;
+
+	#[actix_web::test]
+	async fn test_flash_messages() {
+		let req = test::TestRequest::default().to_http_request();
+		let session = req.get_session();
+
+		set_flash(&session, "success", "Operation completed!");
+		let flash = get_flash(&session);
+		assert!(flash.is_some());
+
+		match flash.unwrap() {
+			StatusMessage::Success(msg) => assert_eq!(msg, "Operation completed!"),
+			_ => panic!("Expected Success status message"),
+		}
+		let flash_after = get_flash(&session);
+		assert!(flash_after.is_none());
+
+		set_flash(&session, "error", "Operation failed!");
+		let flash_err = get_flash(&session);
+		assert!(flash_err.is_some());
+		match flash_err.unwrap() {
+			StatusMessage::Error(msg) => assert_eq!(msg, "Operation failed!"),
+			_ => panic!("Expected Error status message"),
+		}
+	}
 }

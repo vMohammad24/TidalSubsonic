@@ -46,3 +46,31 @@ impl AppError {
 		}
 	}
 }
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn test_app_error_subsonic_code_mapping() {
+		let err = AppError::NotFound("Item not found".into());
+		let (code, msg) = err.into_subsonic_code_and_msg();
+		assert_eq!(code, 70);
+		assert_eq!(msg, "Item not found");
+
+		let err = AppError::BadRequest("Invalid query".into());
+		let (code, msg) = err.into_subsonic_code_and_msg();
+		assert_eq!(code, 10);
+		assert_eq!(msg, "Invalid query");
+
+		let err = AppError::Auth("Bad credentials".into());
+		let (code, msg) = err.into_subsonic_code_and_msg();
+		assert_eq!(code, 40);
+		assert_eq!(msg, "Bad credentials");
+
+		let err = AppError::Internal("System crash".into());
+		let (code, msg) = err.into_subsonic_code_and_msg();
+		assert_eq!(code, 0);
+		assert_eq!(msg, "System crash");
+	}
+}

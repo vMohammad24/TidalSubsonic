@@ -742,3 +742,317 @@ impl DbManager {
 		Ok(favorites)
 	}
 }
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	async fn setup_test_user(db: &DbManager) -> (String, String) {
+		let tidal_id = format!("tidal_{}", uuid::Uuid::new_v4());
+		let username = format!("user_{}", uuid::Uuid::new_v4());
+		let tokens = StoredTokens {
+			access_token: Some("access".into()),
+			refresh_token: None,
+			token_expiry: None,
+			last_data_request: None,
+		};
+		db.save_tokens(&tidal_id, tokens).await.unwrap();
+		db.create_user(&username, &tidal_id, Some("pass"), true, true, false)
+			.await
+			.unwrap();
+		(username, tidal_id)
+	}
+
+	#[sqlx::test]
+	async fn test_db_user_crud(pool: sqlx::PgPool) {
+		let db = DbManager { pool };
+
+		let (test_user, tidal_id) = setup_test_user(&db).await;
+
+		let details = db
+			.get_user_details(&test_user)
+			.await
+			.expect("Fetch details");
+		assert!(details.is_some());
+		let (t_id, enc_p, up, uf, _) = details.unwrap();
+		assert_eq!(t_id, tidal_id);
+		assert_eq!(enc_p, "pass");
+		assert!(up);
+		assert!(uf);
+
+		db.update_user_feature_flags(&test_user, false, false, true)
+			.await
+			.expect("Update flags");
+
+		let details2 = db
+			.get_user_details(&test_user)
+			.await
+			.expect("Fetch updated");
+		assert!(!details2.unwrap().2); // use_playlists is false
+
+		db.delete_user(&test_user).await.expect("Delete user");
+		let details_after_delete = db
+			.get_user_details(&test_user)
+			.await
+			.expect("Fetch deleted");
+		assert!(details_after_delete.is_none());
+	}
+
+	#[sqlx::test]
+	async fn test_db_tokens_crud(pool: sqlx::PgPool) {
+		let db = DbManager { pool };
+
+		let tidal_id = format!("tidal_user_{}", uuid::Uuid::new_v4());
+		let tokens = StoredTokens {
+			access_token: Some("access_123".into()),
+			refresh_token: Some("refresh_123".into()),
+			token_expiry: Some(chrono::Utc::now()),
+			last_data_request: Some(chrono::Utc::now()),
+		};
+
+		db.save_tokens(&tidal_id, tokens.clone())
+			.await
+			.expect("Save tokens");
+
+		let fetched = db
+			.get_tokens_by_tidal_id(&tidal_id)
+			.await
+			.expect("Fetch tokens");
+		assert!(fetched.is_some());
+		let f = fetched.unwrap();
+		assert_eq!(f.access_token.as_deref(), Some("access_123"));
+		assert_eq!(f.refresh_token.as_deref(), Some("refresh_123"));
+
+		db.delete_tokens(&tidal_id).await.expect("Delete tokens");
+		let fetched_deleted = db
+			.get_tokens_by_tidal_id(&tidal_id)
+			.await
+			.expect("Fetch deleted");
+		assert!(fetched_deleted.is_none());
+	}
+
+	#[sqlx::test]
+	async fn test_db_web_session_crud(pool: sqlx::PgPool) {
+		let db = DbManager { pool };
+
+		let session_id = format!("ws_{}", uuid::Uuid::new_v4());
+		let tidal_user = "123456";
+		let username = "session_test_user";
+
+		db.save_web_session(&session_id, tidal_user, username)
+			.await
+			.expect("Save web session");
+
+		let session = db
+			.get_web_session(&session_id)
+			.await
+			.expect("Get web session");
+		assert!(session.is_some());
+		let (tu, u) = session.unwrap();
+		assert_eq!(tu, tidal_user);
+		assert_eq!(u, username);
+
+		db.delete_web_session(&session_id)
+			.await
+			.expect("Delete web session");
+		let deleted = db.get_web_session(&session_id).await.expect("Get deleted");
+		assert!(deleted.is_none());
+	}
+
+	#[sqlx::test]
+	async fn test_db_local_playlists_crud(pool: sqlx::PgPool) {
+		let db = DbManager { pool };
+
+		let (username, _) = setup_test_user(&db).await;
+		let created_pl = db
+			.create_local_playlist(&username, "My Test Playlist", Some("Cool songs"))
+			.await
+			.expect("Create playlist");
+
+		let playlists = db
+			.get_local_playlists(&username)
+			.await
+			.expect("Get playlists");
+		assert_eq!(playlists.len(), 1);
+		assert_eq!(playlists[0].name, "My Test Playlist");
+
+		let track_ids = vec!["1056708".to_string()];
+		db.add_tracks_to_local_playlist(created_pl.id, &track_ids)
+			.await
+			.expect("Add tracks");
+
+		let tracks = db
+			.get_local_playlist_tracks(created_pl.id)
+			.await
+			.expect("Get tracks");
+		assert_eq!(tracks.len(), 1);
+		assert_eq!(tracks[0], "1056708");
+
+		db.delete_local_playlist(created_pl.id, &username)
+			.await
+			.expect("Delete playlist");
+		let playlists_after = db
+			.get_local_playlists(&username)
+			.await
+			.expect("Get playlists");
+		assert!(playlists_after.is_empty());
+	}
+
+	#[sqlx::test]
+	async fn test_db_local_favorites_crud(pool: sqlx::PgPool) {
+		let db = DbManager { pool };
+
+		let (username, _) = setup_test_user(&db).await;
+		db.star_track_local(&username, "1056708")
+			.await
+			.expect("Star track");
+
+		let map = db
+			.get_all_local_favorites_map(&username)
+			.await
+			.expect("Get favorites map");
+		assert!(map.contains_key(&1056708));
+
+		db.unstar_track_local(&username, "1056708")
+			.await
+			.expect("Unstar track");
+
+		let map_after = db
+			.get_all_local_favorites_map(&username)
+			.await
+			.expect("Get favorites map");
+		assert!(!map_after.contains_key(&1056708));
+	}
+
+	#[sqlx::test]
+	async fn test_db_play_queue_crud(pool: sqlx::PgPool) {
+		let db = DbManager { pool };
+
+		let (username, _) = setup_test_user(&db).await;
+		let queue = PlayQueue {
+			username: username.clone(),
+			current_track_id: Some("1056708".into()),
+			position_ms: Some(12000),
+			track_ids: vec!["1056708".into(), "140516546".into()],
+			updated_at: Utc::now(),
+		};
+
+		db.save_play_queue(&queue).await.expect("Save play queue");
+
+		let fetched = db.get_play_queue(&username).await.expect("Get play queue");
+		assert!(fetched.is_some());
+		let q = fetched.unwrap();
+		assert_eq!(q.current_track_id.as_deref(), Some("1056708"));
+		assert_eq!(q.track_ids.len(), 2);
+	}
+
+	#[sqlx::test]
+	async fn test_db_lastfm_link_crud(pool: sqlx::PgPool) {
+		let db = DbManager { pool };
+
+		let (username, _) = setup_test_user(&db).await;
+		db.link_lastfm_account(&username, "session_key_abc", "lastfm_user_1")
+			.await
+			.expect("Link lastfm");
+
+		let details = db
+			.get_lastfm_details(&username)
+			.await
+			.expect("Get lastfm details");
+		assert!(details.is_some());
+		let (sk, lu) = details.unwrap();
+		assert_eq!(sk, "session_key_abc");
+		assert_eq!(lu, "lastfm_user_1");
+
+		db.unlink_lastfm_account(&username)
+			.await
+			.expect("Unlink lastfm");
+		let unlinked = db
+			.get_lastfm_details(&username)
+			.await
+			.expect("Get unlinked");
+		assert!(unlinked.is_none());
+	}
+
+	#[sqlx::test]
+	async fn test_db_local_album_and_artist_favorites(pool: sqlx::PgPool) {
+		let db = DbManager { pool };
+
+		let (username, _) = setup_test_user(&db).await;
+
+		db.star_album_local(&username, "202020")
+			.await
+			.expect("Star album");
+		db.star_artist_local(&username, "303030")
+			.await
+			.expect("Star artist");
+
+		let fav_albums = db
+			.get_local_favorite_albums(&username)
+			.await
+			.expect("Get favorite albums");
+		assert_eq!(fav_albums, vec!["202020"]);
+
+		let fav_artists = db
+			.get_local_favorite_artists(&username)
+			.await
+			.expect("Get favorite artists");
+		assert_eq!(fav_artists, vec!["303030"]);
+
+		db.unstar_album_local(&username, "202020")
+			.await
+			.expect("Unstar album");
+		db.unstar_artist_local(&username, "303030")
+			.await
+			.expect("Unstar artist");
+
+		assert!(
+			db.get_local_favorite_albums(&username)
+				.await
+				.unwrap()
+				.is_empty()
+		);
+		assert!(
+			db.get_local_favorite_artists(&username)
+				.await
+				.unwrap()
+				.is_empty()
+		);
+	}
+
+	#[sqlx::test]
+	async fn test_db_concurrent_playlist_track_insertion(pool: sqlx::PgPool) {
+		let db = DbManager { pool };
+
+		let (username, _) = setup_test_user(&db).await;
+		let playlist = db
+			.create_local_playlist(&username, "Concurrent Playlist", None)
+			.await
+			.expect("Create playlist");
+
+		let db_arc = std::sync::Arc::new(db);
+		let playlist_id = playlist.id;
+
+		let mut handles = Vec::new();
+		for i in 0..5 {
+			let db_clone = db_arc.clone();
+			handles.push(tokio::spawn(async move {
+				let track_id = format!("{}", 90000 + i);
+				db_clone
+					.add_tracks_to_local_playlist(playlist_id, &[track_id])
+					.await
+					.expect("Add track concurrently");
+			}));
+		}
+
+		for handle in handles {
+			handle.await.expect("Join task");
+		}
+
+		let tracks = db_arc
+			.get_local_playlist_tracks(playlist_id)
+			.await
+			.expect("Get tracks");
+		assert_eq!(tracks.len(), 5);
+	}
+}

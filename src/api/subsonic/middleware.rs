@@ -275,4 +275,59 @@ mod tests {
 		assert!(!err_str.contains("SELECT"));
 		assert!(!err_str.contains("sqlx"));
 	}
+
+	#[actix_web::test]
+	async fn test_ping_and_cover_art_bypass_authentication() {
+		let app = test::init_service(
+			App::new()
+				.wrap(SubsonicAuth)
+				.route("/rest/ping.view", web::get().to(dummy_handler))
+				.route("/rest/getCoverArt.view", web::get().to(dummy_handler)),
+		)
+		.await;
+
+		let req = test::TestRequest::get()
+			.uri("/rest/ping.view?u=guest&p=pass&v=1.16.1&c=test")
+			.to_request();
+		let res = test::call_service(&app, req).await;
+		assert_eq!(res.status(), actix_web::http::StatusCode::OK);
+
+		let req_cover = test::TestRequest::get()
+			.uri("/rest/getCoverArt.view?u=guest&p=pass&v=1.16.1&c=test")
+			.to_request();
+		let res_cover = test::call_service(&app, req_cover).await;
+		assert_eq!(res_cover.status(), actix_web::http::StatusCode::OK);
+	}
+
+	#[actix_web::test]
+	async fn test_subsonic_md5_token_calculation() {
+		let password = "my_subsonic_password";
+		let salt = "c1b2a3";
+		let expected_token = format!("{:x}", md5::compute(format!("{}{}", password, salt)));
+
+		let test_token = format!("{:x}", md5::compute("my_subsonic_passwordc1b2a3"));
+		assert_eq!(expected_token, test_token);
+	}
+
+	#[actix_web::test]
+	async fn test_subsonic_auth_rejects_invalid_token() {
+		let app = test::init_service(
+			App::new()
+				.wrap(SubsonicAuth)
+				.route("/rest/getArtists", web::get().to(dummy_handler)),
+		)
+		.await;
+
+		let req = test::TestRequest::get()
+			.uri("/rest/getArtists?u=user1&t=invalid_token_12345&s=salt123&v=1.16.1&c=test")
+			.to_request();
+
+		let res = test::try_call_service(&app, req).await;
+		assert!(res.is_err());
+		let err = res.unwrap_err();
+		assert_eq!(
+			err.error_response().status(),
+			actix_web::http::StatusCode::UNAUTHORIZED
+		);
+	}
 }

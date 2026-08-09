@@ -27,3 +27,25 @@ impl RateLimiter {
 		}
 	}
 }
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn test_rate_limiter_allows_under_limit() {
+		let limiter = RateLimiter::new(3, 60);
+		assert!(limiter.check_and_increment("user1"));
+		assert!(limiter.check_and_increment("user1"));
+		assert!(limiter.check_and_increment("user1"));
+		assert!(!limiter.check_and_increment("user1"));
+	}
+
+	#[test]
+	fn test_rate_limiter_independent_keys() {
+		let limiter = RateLimiter::new(1, 60);
+		assert!(limiter.check_and_increment("user1"));
+		assert!(!limiter.check_and_increment("user1"));
+		assert!(limiter.check_and_increment("user2"));
+	}
+}

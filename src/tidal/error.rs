@@ -48,3 +48,32 @@ impl ResponseError for TidalError {
 		}))
 	}
 }
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn test_tidal_error_status_codes() {
+		assert_eq!(
+			TidalError::Authentication("token expired".into()).status_code(),
+			StatusCode::UNAUTHORIZED
+		);
+		assert_eq!(
+			TidalError::ResourceNotFound("Track".into(), "123".into()).status_code(),
+			StatusCode::NOT_FOUND
+		);
+		assert_eq!(
+			TidalError::RateLimit.status_code(),
+			StatusCode::TOO_MANY_REQUESTS
+		);
+		assert_eq!(
+			TidalError::PaymentRequired.status_code(),
+			StatusCode::PAYMENT_REQUIRED
+		);
+		assert_eq!(
+			TidalError::ApiError(503, "Service Unavailable".into()).status_code(),
+			StatusCode::SERVICE_UNAVAILABLE
+		);
+	}
+}

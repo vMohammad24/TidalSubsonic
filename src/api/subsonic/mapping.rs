@@ -359,3 +359,229 @@ pub fn dedupe_albums(albums: impl IntoIterator<Item = TidalAlbum>) -> Vec<TidalA
 
 	map.into_values().collect()
 }
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::tidal::models::entities::MediaMetadata;
+
+	#[test]
+	fn test_format_date_variations() {
+		assert_eq!(
+			format_date(Some("2023-05-15T12:00:00Z")),
+			"2023-05-15T12:00:00+00:00"
+		);
+		assert_eq!(format_date(Some("2023-05-15")), "2023-05-15T00:00:00+00:00");
+		assert_eq!(format_date(Some("2023-05")), "2023-05-01T00:00:00+00:00");
+		assert_eq!(format_date(Some("2023")), "2023-01-01T00:00:00+00:00");
+		assert_eq!(format_date(Some("")), "");
+		assert_eq!(format_date(None), "");
+		assert_eq!(format_date(Some("invalid-date")), "");
+	}
+
+	#[test]
+	fn test_extract_year_variations() {
+		assert_eq!(extract_year(Some("2023-05-15T12:00:00Z")), Some(2023));
+		assert_eq!(extract_year(Some("2020-01-01")), Some(2020));
+		assert_eq!(extract_year(Some("1999")), Some(1999));
+		assert_eq!(extract_year(Some("invalid")), None);
+		assert_eq!(extract_year(None), None);
+	}
+
+	#[tokio::test]
+	async fn test_map_tidal_artist_to_subsonic() {
+		let artist = TidalArtist {
+			id: 101,
+			name: "Test Artist".to_string(),
+			picture: Some("aaaa-bbbb-cccc".to_string()),
+			..Default::default()
+		};
+
+		let mapped = map_tidal_artist_to_subsonic(&artist, None);
+		assert_eq!(mapped.id, "101");
+		assert_eq!(mapped.name, "Test Artist");
+		assert_eq!(mapped.cover_art, "aaaa-bbbb-cccc");
+		assert_eq!(
+			mapped.artist_image_url,
+			Some("https://resources.tidal.com/images/aaaa/bbbb/cccc/750x750.jpg".to_string())
+		);
+	}
+
+	#[tokio::test]
+	async fn test_map_tidal_album_to_subsonic() {
+		let album = TidalAlbum {
+			id: 202,
+			title: "Greatest Hits".to_string(),
+			release_date: Some("2022-10-10".to_string()),
+			explicit: Some(true),
+			number_of_tracks: Some(12),
+			duration: Some(3600),
+			artist: Some(TidalArtist {
+				id: 101,
+				name: "Test Artist".to_string(),
+				..Default::default()
+			}),
+			..Default::default()
+		};
+
+		let mapped = map_tidal_album_to_subsonic(&album, None, None);
+		assert_eq!(mapped.id, "202");
+		assert_eq!(mapped.name, "Greatest Hits");
+		assert_eq!(mapped.artist, "Test Artist");
+		assert_eq!(mapped.artist_id, "101");
+		assert_eq!(mapped.song_count, 12);
+		assert_eq!(mapped.year, Some(2022));
+		assert_eq!(mapped.explicit_status, Some("explicit".to_string()));
+	}
+
+	#[tokio::test]
+	async fn test_map_tidal_track_bitrate_and_atmos() {
+		let track_hi_res = TidalTrack {
+			id: 301,
+			title: "Hi-Res Track".to_string(),
+			duration: 200,
+			track_number: 1,
+			explicit: false,
+			audio_quality: Some("HI_RES_LOSSLESS".to_string()),
+			artist: TidalArtist {
+				id: 101,
+				name: "Artist".to_string(),
+				..Default::default()
+			},
+			album: TidalAlbum {
+				id: 202,
+				title: "Album".to_string(),
+				..Default::default()
+			},
+			media_metadata: Some(MediaMetadata {
+				tags: Some(vec!["DOLBY_ATMOS".to_string()]),
+			}),
+			..Default::default()
+		};
+
+		let mapped = map_tidal_track_to_subsonic(&track_hi_res, None, None, None);
+		assert_eq!(mapped.bit_rate, 9216);
+		assert_eq!(mapped.content_type, "audio/mp4");
+		assert_eq!(mapped.suffix, "m4a");
+
+		let track_low = TidalTrack {
+			id: 302,
+			audio_quality: Some("LOW".to_string()),
+			artist: TidalArtist {
+				id: 101,
+				name: "Artist".to_string(),
+				..Default::default()
+			},
+			album: TidalAlbum {
+				id: 202,
+				title: "Album".to_string(),
+				..Default::default()
+			},
+			..Default::default()
+		};
+
+		let mapped_low = map_tidal_track_to_subsonic(&track_low, None, None, None);
+		assert_eq!(mapped_low.bit_rate, 96);
+		assert_eq!(mapped_low.content_type, "audio/flac");
+		assert_eq!(mapped_low.suffix, "flac");
+	}
+
+	#[test]
+	fn test_dedupe_albums_quality_and_atmos() {
+		let artist = TidalArtist {
+			id: 10,
+			name: "Artist 1".to_string(),
+			..Default::default()
+		};
+
+		let album_low = TidalAlbum {
+			id: 1,
+			title: "Same Album".to_string(),
+			audio_quality: Some("LOW".to_string()),
+			artist: Some(artist.clone()),
+			..Default::default()
+		};
+
+		let album_lossless = TidalAlbum {
+			id: 2,
+			title: "Same Album".to_string(),
+			audio_quality: Some("LOSSLESS".to_string()),
+			artist: Some(artist.clone()),
+			..Default::default()
+		};
+
+		let album_atmos = TidalAlbum {
+			id: 3,
+			title: "Atmos Album".to_string(),
+			audio_quality: Some("HI_RES_LOSSLESS".to_string()),
+			artist: Some(artist.clone()),
+			media_metadata: Some(MediaMetadata {
+				tags: Some(vec!["DOLBY_ATMOS".to_string()]),
+			}),
+			..Default::default()
+		};
+
+		let deduped = dedupe_albums(vec![album_low, album_lossless, album_atmos]);
+		assert_eq!(deduped.len(), 2);
+
+		let same_album = deduped
+			.iter()
+			.find(|a| a.title == "Same Album")
+			.expect("Same Album should exist");
+		assert_eq!(same_album.id, 2);
+
+		let atmos_album = deduped
+			.iter()
+			.find(|a| a.title.contains("Atmos Album"))
+			.expect("Atmos album should exist");
+		assert_eq!(atmos_album.title, "[DA] Atmos Album");
+	}
+
+	#[test]
+	fn test_map_tidal_playlist_to_subsonic() {
+		let playlist = TidalPlaylist {
+			uuid: "pl-123".to_string(),
+			title: "Synthwave Beats".to_string(),
+			number_of_tracks: 15,
+			duration: 2700,
+			description: Some("Retro vibes".to_string()),
+			created: Some("2021-04-01T10:00:00Z".to_string()),
+			last_updated: Some("2021-04-02T10:00:00Z".to_string()),
+			custom_image_url: Some("http://example.com/cover.jpg".to_string()),
+			..Default::default()
+		};
+
+		let mapped = map_tidal_playlist_to_subsonic(&playlist, Some("DJ Synth"));
+		assert_eq!(mapped.id, "pl-123");
+		assert_eq!(mapped.name, "Synthwave Beats");
+		assert_eq!(mapped.owner.as_deref(), Some("DJ Synth"));
+		assert_eq!(mapped.song_count, 15);
+		assert_eq!(mapped.duration, 2700);
+		assert_eq!(
+			mapped.cover_art.as_deref(),
+			Some("http://example.com/cover.jpg")
+		);
+		assert_eq!(mapped.comment.as_deref(), Some("Retro vibes"));
+	}
+
+	#[test]
+	fn test_map_local_playlist_to_subsonic() {
+		let local_pl = LocalPlaylistWithCount {
+			id: uuid::Uuid::nil(),
+			username: "alice".to_string(),
+			name: "Local Favorites".to_string(),
+			comment: Some("My collection".to_string()),
+			created_at: chrono::DateTime::UNIX_EPOCH,
+			updated_at: chrono::DateTime::UNIX_EPOCH,
+			song_count: 8,
+			duration: 1600,
+		};
+
+		let mapped = map_local_playlist_to_subsonic(&local_pl);
+		assert_eq!(mapped.id, "00000000-0000-0000-0000-000000000000");
+		assert_eq!(mapped.name, "Local Favorites");
+		assert_eq!(mapped.owner.as_deref(), Some("alice"));
+		assert_eq!(mapped.song_count, 8);
+		assert_eq!(mapped.duration, 1600);
+	}
+}

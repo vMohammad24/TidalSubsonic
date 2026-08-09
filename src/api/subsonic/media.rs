@@ -580,3 +580,119 @@ pub async fn get_lyrics(
 
 	SubsonicResponder(SubsonicResponseWrapper::ok().with_lyrics(subsonic_lyrics))
 }
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use actix_web::test;
+
+	#[actix_web::test]
+	async fn test_parse_dash_manifest_template_urls() {
+		let dash_xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+		<MPD xmlns="urn:mpeg:dash:schema:mpd:2011">
+			<Period>
+				<AdaptationSet mimeType="audio/flac">
+					<SegmentTemplate initialization="init.mp4" media="segment_$Number$.m4s" startNumber="1">
+						<SegmentTimeline>
+							<S r="2" />
+						</SegmentTimeline>
+					</SegmentTemplate>
+				</AdaptationSet>
+			</Period>
+		</MPD>"#;
+
+		let manifest = DashManifestParser::parse(dash_xml).expect("Failed to parse DASH manifest");
+		assert_eq!(manifest.mime_type, "audio/flac");
+		assert_eq!(manifest.urls.len(), 4); // 1 init URL + 3 segment URLs (r=2 means 1 + 2 = 3 segments)
+		assert_eq!(manifest.urls[0], "init.mp4");
+		assert_eq!(manifest.urls[1], "segment_1.m4s");
+		assert_eq!(manifest.urls[2], "segment_2.m4s");
+		assert_eq!(manifest.urls[3], "segment_3.m4s");
+	}
+
+	#[actix_web::test]
+	async fn test_parse_dash_manifest_base_url() {
+		let dash_xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+		<MPD xmlns="urn:mpeg:dash:schema:mpd:2011">
+			<Period>
+				<AdaptationSet mimeType="audio/mp4">
+					<BaseURL>https://stream.tidal.com/chunk1.mp4</BaseURL>
+					<BaseURL>https://stream.tidal.com/chunk2.mp4</BaseURL>
+				</AdaptationSet>
+			</Period>
+		</MPD>"#;
+
+		let manifest =
+			DashManifestParser::parse(dash_xml).expect("Failed to parse BaseURL manifest");
+		assert_eq!(manifest.mime_type, "audio/mp4");
+		assert_eq!(manifest.urls.len(), 2);
+		assert_eq!(manifest.urls[0], "https://stream.tidal.com/chunk1.mp4");
+		assert_eq!(manifest.urls[1], "https://stream.tidal.com/chunk2.mp4");
+	}
+
+	#[actix_web::test]
+	async fn test_parse_dash_manifest_invalid_xml() {
+		let result = DashManifestParser::parse("<invalid>xml");
+		assert!(result.is_err() || result.unwrap().urls.is_empty());
+	}
+
+	#[actix_web::test]
+	async fn test_get_cover_art_http_redirect() {
+		let req = test::TestRequest::get().to_http_request();
+		let query = web::Query(GetCoverArtQuery {
+			id: "http://example.com/cover.png".to_string(),
+		});
+
+		let resp = get_cover_art(query, req).await.respond_to(
+			&test::TestRequest::get()
+				.uri("/rest/getCoverArt?id=http://example.com/cover.png")
+				.to_http_request(),
+		);
+
+		assert_eq!(resp.status(), actix_web::http::StatusCode::FOUND);
+		assert_eq!(
+			resp.headers().get("Location").unwrap(),
+			"http://example.com/cover.png"
+		);
+	}
+
+	#[actix_web::test]
+	async fn test_get_cover_art_uuid_transformation() {
+		let req = test::TestRequest::get().to_http_request();
+		let query = web::Query(GetCoverArtQuery {
+			id: "12345678-1234-1234-1234-1234567890ab".to_string(),
+		});
+
+		let resp = get_cover_art(query, req).await.respond_to(
+			&test::TestRequest::get()
+				.uri("/rest/getCoverArt?id=12345678-1234-1234-1234-1234567890ab")
+				.to_http_request(),
+		);
+
+		assert_eq!(resp.status(), actix_web::http::StatusCode::FOUND);
+		assert_eq!(
+			resp.headers().get("Location").unwrap(),
+			"https://resources.tidal.com/images/12345678/1234/1234/1234/1234567890ab/750x750.jpg"
+		);
+	}
+
+	#[actix_web::test]
+	async fn test_get_cover_art_collage_transformation() {
+		let req = test::TestRequest::get().to_http_request();
+		let query = web::Query(GetCoverArtQuery {
+			id: "COLLAGE:aaaa-bbbb-cccc,dddd-eeee-ffff".to_string(),
+		});
+
+		let resp = get_cover_art(query, req).await.respond_to(
+			&test::TestRequest::get()
+				.uri("/rest/getCoverArt?id=COLLAGE:aaaa-bbbb-cccc,dddd-eeee-ffff")
+				.to_http_request(),
+		);
+
+		assert_eq!(resp.status(), actix_web::http::StatusCode::FOUND);
+		assert_eq!(
+			resp.headers().get("Location").unwrap(),
+			"https://resources.tidal.com/images/aaaa/bbbb/cccc/750x750.jpg"
+		);
+	}
+}

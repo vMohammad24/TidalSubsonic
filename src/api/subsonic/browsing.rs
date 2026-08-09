@@ -742,3 +742,37 @@ pub async fn get_internet_radio_stations() -> impl Responder {
 	});
 	SubsonicResponder(resp)
 }
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use actix_web::body::to_bytes;
+	use actix_web::test;
+
+	#[actix_web::test]
+	async fn test_get_music_folders_response() {
+		let req = test::TestRequest::get()
+			.uri("/rest/getMusicFolders")
+			.to_http_request();
+		let resp = get_music_folders().await.respond_to(&req);
+		assert_eq!(resp.status(), actix_web::http::StatusCode::OK);
+
+		let body_bytes = to_bytes(resp.into_body()).await.unwrap_or_default();
+		let body_str = String::from_utf8_lossy(&body_bytes);
+		assert!(body_str.contains("<musicFolders>"));
+		assert!(body_str.contains("name=\"Tidal\""));
+	}
+
+	#[actix_web::test]
+	async fn test_get_internet_radio_stations_response() {
+		let req = test::TestRequest::get()
+			.uri("/rest/getInternetRadioStations")
+			.to_http_request();
+		let resp = get_internet_radio_stations().await.respond_to(&req);
+		assert_eq!(resp.status(), actix_web::http::StatusCode::OK);
+
+		let body_bytes = to_bytes(resp.into_body()).await.unwrap_or_default();
+		let body_str = String::from_utf8_lossy(&body_bytes);
+		assert!(body_str.contains("<internetRadioStations"));
+	}
+}

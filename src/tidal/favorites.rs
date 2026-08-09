@@ -102,3 +102,62 @@ pub fn get_favorites_count(user_id: i64) -> usize {
 		.and_then(|favorites| favorites.read().ok().map(|guard| guard.len()))
 		.unwrap_or(0)
 }
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn test_user_favorites_cache_operations() {
+		let user_id = 998877;
+		let item_id = 12345;
+		let date = "2023-01-01T00:00:00Z".to_string();
+
+		assert_eq!(get_favorites_count(user_id), 0);
+		assert_eq!(get_favorite_date(user_id, item_id), None);
+
+		add_favorite(user_id, item_id, date.clone());
+		assert_eq!(get_favorites_count(user_id), 1);
+		assert_eq!(get_favorite_date(user_id, item_id), Some(date));
+
+		remove_favorite(user_id, item_id);
+		assert_eq!(get_favorites_count(user_id), 0);
+		assert_eq!(get_favorite_date(user_id, item_id), None);
+	}
+
+	#[test]
+	fn test_local_favorites_cache_operations() {
+		let username = "test_user_fav";
+		let item_id = 54321;
+		let date = "2023-06-01T12:00:00Z".to_string();
+
+		assert_eq!(get_local_favorite_date(username, item_id), None);
+
+		add_local_favorite(username, item_id, date.clone());
+		assert_eq!(get_local_favorite_date(username, item_id), Some(date));
+
+		remove_local_favorite(username, item_id);
+		assert_eq!(get_local_favorite_date(username, item_id), None);
+	}
+
+	#[tokio::test]
+	async fn test_concurrent_cache_operations() {
+		let mut handles = Vec::new();
+		for i in 0..20 {
+			handles.push(tokio::spawn(async move {
+				let user_id = 1000 + i;
+				let item_id = 5000 + i;
+				let date = format!("2026-01-01T00:00:{:02}Z", i);
+
+				add_favorite(user_id, item_id, date.clone());
+				assert_eq!(get_favorite_date(user_id, item_id), Some(date));
+				assert!(get_favorites_count(user_id) >= 1);
+				remove_favorite(user_id, item_id);
+			}));
+		}
+
+		for handle in handles {
+			handle.await.expect("Task should join successfully");
+		}
+	}
+}

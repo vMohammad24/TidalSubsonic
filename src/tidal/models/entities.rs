@@ -370,3 +370,95 @@ macro_rules! impl_cacheable {
 impl_cacheable!(Album, ALBUM_CACHE);
 impl_cacheable!(Track, TRACK_CACHE);
 impl_cacheable!(Artist, ARTIST_CACHE);
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn test_artist_deserialization() {
+		let json_data = serde_json::json!({
+			"id": 12345,
+			"name": "Daft Punk",
+			"url": "https://tidal.com/artist/12345",
+			"picture": "abc-def",
+			"popularity": 95,
+			"artistTypes": ["ARTIST"],
+			"selectedAlbumCoverFallback": "xyz-123"
+		});
+
+		let artist: Artist =
+			serde_json::from_value(json_data).expect("Failed to deserialize Artist");
+		assert_eq!(artist.id, 12345);
+		assert_eq!(artist.name, "Daft Punk");
+		assert_eq!(artist.picture.as_deref(), Some("abc-def"));
+		assert_eq!(
+			artist.selected_album_cover_fallback.as_deref(),
+			Some("xyz-123")
+		);
+	}
+
+	#[test]
+	fn test_album_deserialization() {
+		let json_data = serde_json::json!({
+			"id": 999,
+			"title": "Random Access Memories",
+			"duration": 4434,
+			"numberOfTracks": 13,
+			"releaseDate": "2013-05-17",
+			"explicit": false,
+			"cover": "cover-uuid",
+			"audioQuality": "HI_RES_LOSSLESS",
+			"mediaMetadata": {
+				"tags": ["DOLBY_ATMOS"]
+			}
+		});
+
+		let album: Album = serde_json::from_value(json_data).expect("Failed to deserialize Album");
+		assert_eq!(album.id, 999);
+		assert_eq!(album.title, "Random Access Memories");
+		assert_eq!(album.number_of_tracks, Some(13));
+		assert_eq!(album.audio_quality.as_deref(), Some("HI_RES_LOSSLESS"));
+		assert_eq!(
+			album
+				.media_metadata
+				.as_ref()
+				.and_then(|m| m.tags.as_ref())
+				.unwrap(),
+			&vec!["DOLBY_ATMOS".to_string()]
+		);
+	}
+
+	#[test]
+	fn test_track_deserialization() {
+		let json_data = serde_json::json!({
+			"id": 555,
+			"title": "Get Lucky",
+			"duration": 248,
+			"trackNumber": 8,
+			"volumeNumber": 1,
+			"explicit": false,
+			"audioQuality": "LOSSLESS",
+			"artist": {
+				"id": 12345,
+				"name": "Daft Punk"
+			},
+			"artists": [{
+				"id": 12345,
+				"name": "Daft Punk"
+			}],
+			"album": {
+				"id": 999,
+				"title": "Random Access Memories"
+			},
+			"url": "https://tidal.com/track/555"
+		});
+
+		let track: Track = serde_json::from_value(json_data).expect("Failed to deserialize Track");
+		assert_eq!(track.id, 555);
+		assert_eq!(track.title, "Get Lucky");
+		assert_eq!(track.track_number, 8);
+		assert_eq!(track.artist.name, "Daft Punk");
+		assert_eq!(track.album.title, "Random Access Memories");
+	}
+}

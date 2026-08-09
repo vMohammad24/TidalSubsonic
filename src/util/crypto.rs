@@ -58,3 +58,38 @@ pub fn decrypt_string(encrypted_b64: &str) -> Result<String, CryptoError> {
 
 	String::from_utf8(decrypted).map_err(|_| CryptoError::DecryptionFailed("Invalid UTF-8".into()))
 }
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn test_encrypt_decrypt_roundtrip() {
+		let secret = "super_secret_password_123!";
+		let encrypted = encrypt_string(secret).expect("Encryption failed");
+		assert_ne!(secret, encrypted);
+
+		let decrypted = decrypt_string(&encrypted).expect("Decryption failed");
+		assert_eq!(secret, decrypted);
+	}
+
+	#[test]
+	fn test_decrypt_invalid_base64() {
+		let result = decrypt_string("invalid_base64!!!");
+		assert!(matches!(result, Err(CryptoError::Base64Decode(_))));
+	}
+
+	#[test]
+	fn test_decrypt_short_ciphertext() {
+		let short_b64 = base64::engine::general_purpose::STANDARD.encode([1u8; 5]);
+		let result = decrypt_string(&short_b64);
+		assert!(matches!(result, Err(CryptoError::InvalidLength)));
+	}
+
+	#[test]
+	fn test_decrypt_corrupted_ciphertext() {
+		let corrupted_b64 = base64::engine::general_purpose::STANDARD.encode([0u8; 30]);
+		let result = decrypt_string(&corrupted_b64);
+		assert!(matches!(result, Err(CryptoError::DecryptionFailed(_))));
+	}
+}
