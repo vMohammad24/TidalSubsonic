@@ -824,14 +824,15 @@ impl TidalApi {
 	}
 
 	pub async fn add_favorite_track(&self, track_id: i64) -> Result<(), TidalError> {
+		let user_id = self.user_id().ok_or_else(|| {
+			TidalError::Authentication("User ID required for favorite operations".into())
+		})?;
 		let body = [("trackIds", track_id.to_string())];
-		if let Some(user_id) = self.user_id() {
-			add_favorite(user_id, track_id, Utc::now().to_rfc3339());
-		}
+		add_favorite(user_id, track_id, Utc::now().to_rfc3339());
 		self.session
 			.request::<()>(
 				reqwest::Method::POST,
-				"/users/favorites/tracks",
+				&format!("/users/{}/favorites/tracks", user_id),
 				None,
 				Some(&body),
 				crate::tidal::session::ApiVersion::V1,
@@ -841,13 +842,14 @@ impl TidalApi {
 	}
 
 	pub async fn remove_favorite_track(&self, track_id: i64) -> Result<(), TidalError> {
-		if let Some(user_id) = self.user_id() {
-			remove_favorite(user_id, track_id);
-		}
+		let user_id = self.user_id().ok_or_else(|| {
+			TidalError::Authentication("User ID required for favorite operations".into())
+		})?;
+		remove_favorite(user_id, track_id);
 		self.session
 			.request::<()>(
 				reqwest::Method::DELETE,
-				&format!("/users/favorites/tracks/{}", track_id),
+				&format!("/users/{}/favorites/tracks/{}", user_id, track_id),
 				None,
 				None,
 				crate::tidal::session::ApiVersion::V1,
