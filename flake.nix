@@ -61,7 +61,7 @@
           // {
             inherit cargoArtifacts;
             pname = "tss";
-            cargoTestExtraArgs = "-- --skip db::tets --skip util::crypto";
+            cargoTestExtraArgs = "-- --skip db::tests --skip util::crypto";
           });
       in {
         packages = {
