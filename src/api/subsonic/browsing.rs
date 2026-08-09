@@ -1,3 +1,4 @@
+use crate::api::lastfm::LASTFM_CLIENT;
 use crate::api::subsonic::models::{
 	AlbumList, Artist, Child, Directory, Index, Indexes, InternetRadioStations, MusicFolder,
 	MusicFolders, SimilarSongs, SubsonicResponseWrapper, TopSongs,
@@ -444,15 +445,21 @@ pub async fn get_album_list(
 		let lfm_limit = (size + offset as usize).max(20) as u32;
 		let lfm_res = match list_query.r#type.as_str() {
 			"random" => {
-				crate::api::lastfm::get_random_albums(&session_key, &username, lfm_limit).await
+				LASTFM_CLIENT
+					.random_albums(&username, &session_key, lfm_limit)
+					.await
 			}
 			"recent" => {
-				crate::api::lastfm::get_recent_tracks(&session_key, &username, lfm_limit).await
+				LASTFM_CLIENT
+					.recent_tracks(&username, &session_key, lfm_limit)
+					.await
 			}
 			"frequent" => {
-				crate::api::lastfm::get_top_albums(&session_key, &username, lfm_limit).await
+				LASTFM_CLIENT
+					.top_albums(&username, &session_key, lfm_limit, None)
+					.await
 			}
-			_ => crate::api::lastfm::get_top_albums_by_tags(&username, lfm_limit).await,
+			_ => LASTFM_CLIENT.top_albums_by_tags(&username, lfm_limit).await,
 		};
 
 		if let Ok(lfm_albums) = lfm_res {

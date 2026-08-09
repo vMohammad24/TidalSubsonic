@@ -1,7 +1,7 @@
+use crate::api::lastfm::{LASTFM_CLIENT, ScrobbleTrack};
 use crate::api::subsonic::models::{PlayQueue, SubsonicResponseWrapper};
 use crate::api::subsonic::response::SubsonicResponder;
 use crate::db::{DbManager, PlayQueue as DbPlayQueue};
-use crate::util::http_client;
 use actix_web::{Responder, web};
 use serde::Deserialize;
 use serde_qs::actix::QsQuery;
@@ -20,25 +20,6 @@ pub async fn set_rating(query: web::Query<SetRatingQuery>) -> impl Responder {
 		query.id
 	);
 	SubsonicResponder(SubsonicResponseWrapper::ok())
-}
-
-fn compute_lastfm_signature<K: AsRef<str>, V: AsRef<str>>(
-	params: &[(K, V)],
-	api_secret: &str,
-) -> String {
-	let mut sorted: Vec<_> = params
-		.iter()
-		.map(|(k, v)| (k.as_ref(), v.as_ref()))
-		.collect();
-	sorted.sort_unstable_by(|a, b| a.0.cmp(b.0));
-
-	let mut sig_str = String::new();
-	for (k, v) in sorted {
-		sig_str.push_str(k);
-		sig_str.push_str(v);
-	}
-	sig_str.push_str(api_secret);
-	format!("{:x}", md5::compute(sig_str))
 }
 
 pub async fn scrobble(
@@ -74,19 +55,11 @@ pub async fn scrobble(
 	};
 	let session_key = lastfm_details.0;
 
-	let api_key = match std::env::var("LASTFM_API_KEY") {
-		Ok(key) => key,
-		Err(_) => return SubsonicResponder(SubsonicResponseWrapper::ok()),
-	};
-	let api_secret = match std::env::var("LASTFM_API_SECRET") {
-		Ok(secret) => secret,
-		Err(_) => return SubsonicResponder(SubsonicResponseWrapper::ok()),
-	};
-
 	let api = &subsonic_ctx.tidal_api;
 
-	let reqwest_client = http_client();
-	let url = "http://ws.audioscrobbler.com/2.0/";
+	if !LASTFM_CLIENT.is_configured() {
+		return SubsonicResponder(SubsonicResponseWrapper::ok());
+	}
 
 	if !submission {
 		if let Ok(tid) = ids[0].parse::<i64>()
@@ -101,31 +74,20 @@ pub async fn scrobble(
 				.record_scrobble(&subsonic_ctx.user, &ids[0], played_at, false)
 				.await;
 
-			let mut params = vec![
-				("method", "track.updateNowPlaying"),
-				("track", &track.title),
-				("artist", &track.artist.name),
-				("api_key", &api_key),
-				("sk", &session_key),
-			];
-			params.push(("album", &track.album.title));
-			let duration_str = track.duration.to_string();
-			params.push(("duration", &duration_str));
-
-			let api_sig = compute_lastfm_signature(&params, &api_secret);
-			params.push(("api_sig", &api_sig));
-			let _ = reqwest_client.post(url).form(&params).send().await;
+			let _ = LASTFM_CLIENT
+				.now_playing(
+					&session_key,
+					&track.title,
+					&track.artist.name,
+					Some(&track.album.title),
+					Some(track.duration),
+				)
+				.await;
 		}
 	} else {
-		let mut params: Vec<(std::borrow::Cow<'static, str>, String)> = vec![
-			("method".into(), "track.scrobble".to_string()),
-			("api_key".into(), api_key),
-			("sk".into(), session_key),
-		];
-
-		let mut count = 0;
+		let mut scrobbles = Vec::with_capacity(ids.len().min(50));
 		for (i, id_str) in ids.iter().enumerate() {
-			if count >= 50 {
+			if scrobbles.len() >= 50 {
 				break;
 			}
 			if let Ok(tid) = id_str.parse::<i64>()
@@ -142,26 +104,18 @@ pub async fn scrobble(
 					.record_scrobble(&subsonic_ctx.user, id_str, played_at, true)
 					.await;
 
-				params.push((format!("track[{}]", count).into(), track.title));
-				params.push((format!("artist[{}]", count).into(), track.artist.name));
-				params.push((
-					format!("timestamp[{}]", count).into(),
-					timestamp.to_string(),
-				));
-				params.push((format!("album[{}]", count).into(), track.album.title));
-				params.push((
-					format!("duration[{}]", count).into(),
-					track.duration.to_string(),
-				));
-
-				count += 1;
+				scrobbles.push(ScrobbleTrack {
+					track: track.title,
+					artist: track.artist.name,
+					album: Some(track.album.title),
+					duration: Some(track.duration),
+					timestamp,
+				});
 			}
 		}
 
-		if count > 0 {
-			let api_sig = compute_lastfm_signature(&params, &api_secret);
-			params.push(("api_sig".into(), api_sig));
-			let _ = reqwest_client.post(url).form(&params).send().await;
+		if !scrobbles.is_empty() {
+			let _ = LASTFM_CLIENT.scrobble(&session_key, &scrobbles).await;
 		}
 	}
 

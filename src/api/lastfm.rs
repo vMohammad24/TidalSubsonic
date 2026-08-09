@@ -9,36 +9,28 @@ use rand::seq::SliceRandom;
 use serde::Deserialize;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, LazyLock, RwLock};
+use thiserror::Error;
 
-#[derive(Deserialize)]
-struct LastFmUserTopTagsResponse {
-	toptags: LastFmTopTags,
-}
+const ENDPOINT: &str = "https://ws.audioscrobbler.com/2.0/";
+const AUTH_URL: &str = "https://www.last.fm/api/auth/";
+const MAX_SCROBBLES_PER_REQUEST: usize = 50;
 
-#[derive(Deserialize)]
-struct LastFmTopTags {
-	tag: Vec<LastFmTag>,
-}
+#[derive(Debug, Error)]
+pub enum LastFmError {
+	#[error("Last.fm integration is not configured on the server")]
+	NotConfigured,
 
-#[derive(Deserialize)]
-struct LastFmTag {
-	name: String,
-}
+	#[error("Network or HTTP request error: {0}")]
+	Http(#[from] reqwest::Error),
 
-#[derive(Deserialize)]
-struct LastFmTagTopAlbumsResponse {
-	albums: LastFmTagAlbums,
-}
+	#[error("Failed to parse Last.fm response: {0}")]
+	Parse(#[from] serde_json::Error),
 
-#[derive(Deserialize)]
-struct LastFmTagAlbums {
-	album: Vec<LastFmTagAlbum>,
-}
+	#[error("Last.fm API error ({0}): {1}")]
+	Api(i16, String),
 
-#[derive(Deserialize)]
-struct LastFmTagAlbum {
-	name: String,
-	artist: LastFmArtist,
+	#[error("{0}")]
+	Message(String),
 }
 
 #[derive(Debug, Clone)]
@@ -47,179 +39,376 @@ pub struct LastFmAlbum {
 	pub album: String,
 }
 
-#[derive(Deserialize)]
+pub struct ScrobbleTrack {
+	pub track: String,
+	pub artist: String,
+	pub album: Option<String>,
+	pub duration: Option<i64>,
+	pub timestamp: i64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct LastFmSession {
+	pub name: String,
+	pub key: String,
+}
+
+pub struct LastFmClient {
+	api_key: String,
+	api_secret: String,
+}
+
+pub static LASTFM_CLIENT: LazyLock<LastFmClient> = LazyLock::new(LastFmClient::from_env);
+
+impl LastFmClient {
+	fn from_env() -> Self {
+		Self {
+			api_key: std::env::var("LASTFM_API_KEY").unwrap_or_default(),
+			api_secret: std::env::var("LASTFM_API_SECRET").unwrap_or_default(),
+		}
+	}
+
+	pub fn is_configured(&self) -> bool {
+		!self.api_key.is_empty() && !self.api_secret.is_empty()
+	}
+
+	pub fn auth_url(&self, callback_url: &str) -> String {
+		format!(
+			"{AUTH_URL}?api_key={}&cb={}",
+			self.api_key,
+			urlencoding::encode(callback_url)
+		)
+	}
+
+	fn sign(&self, params: &BTreeMap<String, String>) -> String {
+		let mut sig = String::with_capacity(256);
+		for (key, value) in params.iter() {
+			sig.push_str(key);
+			sig.push_str(value);
+		}
+		sig.push_str(&self.api_secret);
+		format!("{:x}", md5::compute(sig.as_bytes()))
+	}
+
+	async fn post(
+		&self,
+		method: &str,
+		session_key: Option<&str>,
+		params: &mut BTreeMap<String, String>,
+	) -> Result<serde_json::Value, LastFmError> {
+		if !self.is_configured() {
+			return Err(LastFmError::NotConfigured);
+		}
+
+		params.insert("method".to_string(), method.to_string());
+		params.insert("api_key".to_string(), self.api_key.clone());
+		if let Some(session_key) = session_key {
+			params.insert("sk".to_string(), session_key.to_string());
+		}
+
+		let api_sig = self.sign(params);
+		params.insert("api_sig".to_string(), api_sig);
+		params.insert("format".to_string(), "json".to_string());
+
+		let res = http_client().post(ENDPOINT).form(&params).send().await?;
+		let status = res.status();
+		let body: serde_json::Value = res.json().await?;
+
+		if !status.is_success() {
+			let code = body
+				.get("error")
+				.and_then(|e| e.as_i64())
+				.unwrap_or(status.as_u16() as i64);
+			let message = body
+				.get("message")
+				.and_then(|m| m.as_str())
+				.unwrap_or("HTTP error");
+			return Err(LastFmError::Api(code as i16, message.to_string()));
+		}
+
+		if let Some(code) = body.get("error").and_then(|e| e.as_i64())
+			&& code != 0
+		{
+			let message = body
+				.get("message")
+				.and_then(|m| m.as_str())
+				.unwrap_or("Unknown error");
+			return Err(LastFmError::Api(code as i16, message.to_string()));
+		}
+
+		Ok(body)
+	}
+
+	pub async fn top_albums(
+		&self,
+		username: &str,
+		session_key: &str,
+		limit: u32,
+		page: Option<u32>,
+	) -> Result<Vec<LastFmAlbum>, LastFmError> {
+		let mut params = BTreeMap::new();
+		params.insert("user".to_string(), username.to_string());
+		params.insert("limit".to_string(), limit.to_string());
+		if let Some(page) = page {
+			params.insert("page".to_string(), page.to_string());
+		}
+
+		let body = self
+			.post("user.getTopAlbums", Some(session_key), &mut params)
+			.await?;
+		let data: LastFmTopAlbumsResponse = serde_json::from_value(body)?;
+		Ok(data.topalbums.album.into_iter().map(Into::into).collect())
+	}
+
+	pub async fn random_albums(
+		&self,
+		username: &str,
+		session_key: &str,
+		limit: u32,
+	) -> Result<Vec<LastFmAlbum>, LastFmError> {
+		let page = rand::rng().random_range(1..=10);
+		let mut albums = self
+			.top_albums(username, session_key, limit, Some(page))
+			.await?;
+		albums.shuffle(&mut rand::rng());
+		Ok(albums)
+	}
+
+	pub async fn recent_tracks(
+		&self,
+		username: &str,
+		session_key: &str,
+		limit: u32,
+	) -> Result<Vec<LastFmAlbum>, LastFmError> {
+		let mut params = BTreeMap::new();
+		params.insert("user".to_string(), username.to_string());
+		params.insert("limit".to_string(), limit.to_string());
+
+		let body = self
+			.post("user.getrecenttracks", Some(session_key), &mut params)
+			.await?;
+		let data: LastFmRecentTracksResponse = serde_json::from_value(body)?;
+
+		let mut seen = HashSet::with_capacity(limit as usize);
+		let mut albums = Vec::with_capacity(limit as usize);
+
+		for track in data.recenttracks.track {
+			if track.album.text.is_empty() || track.artist.text.is_empty() {
+				continue;
+			}
+			if seen.insert(format!("{}|{}", track.artist.text, track.album.text)) {
+				albums.push(LastFmAlbum {
+					artist: track.artist.text,
+					album: track.album.text,
+				});
+			}
+		}
+
+		Ok(albums)
+	}
+
+	pub async fn top_albums_by_tags(
+		&self,
+		username: &str,
+		limit: u32,
+	) -> Result<Vec<LastFmAlbum>, LastFmError> {
+		let mut tags_params = BTreeMap::new();
+		tags_params.insert("user".to_string(), username.to_string());
+		tags_params.insert("limit".to_string(), "5".to_string());
+
+		let body = self.post("user.getTopTags", None, &mut tags_params).await?;
+		let tags_data: LastFmUserTopTagsResponse = serde_json::from_value(body)?;
+
+		let fetch_futures = tags_data.toptags.tag.into_iter().map(|tag| {
+			let tag_name = tag.name.clone();
+			let tag = tag.name;
+			async move {
+				let mut album_params = BTreeMap::new();
+				album_params.insert("tag".to_string(), tag);
+				album_params.insert("limit".to_string(), limit.to_string());
+
+				match self.post("tag.getTopAlbums", None, &mut album_params).await {
+					Ok(body) => match serde_json::from_value::<LastFmTagTopAlbumsResponse>(body) {
+						Ok(data) => Some(data.albums.album),
+						Err(error) => {
+							tracing::warn!(
+								tag = %tag_name,
+								error = %error,
+								"Failed to deserialize tag.getTopAlbums response"
+							);
+							None
+						}
+					},
+					Err(error) => {
+						tracing::warn!(
+							tag = %tag_name,
+							error = %error,
+							"Request failed for tag.getTopAlbums"
+						);
+						None
+					}
+				}
+			}
+		});
+
+		let results = join_all(fetch_futures).await;
+
+		let mut albums = Vec::with_capacity(limit as usize);
+		let mut seen = HashSet::with_capacity(limit as usize);
+
+		for tag_albums in results.into_iter().flatten() {
+			for entry in tag_albums {
+				if albums.len() >= limit as usize {
+					break;
+				}
+				if entry.name.is_empty() || entry.artist.name.is_empty() {
+					continue;
+				}
+				let album: LastFmAlbum = entry.into();
+				if seen.insert(format!("{}|{}", album.artist, album.album)) {
+					albums.push(album);
+				}
+			}
+			if albums.len() >= limit as usize {
+				break;
+			}
+		}
+
+		Ok(albums)
+	}
+
+	pub async fn now_playing(
+		&self,
+		session_key: &str,
+		track: &str,
+		artist: &str,
+		album: Option<&str>,
+		duration: Option<i64>,
+	) -> Result<(), LastFmError> {
+		let mut params = BTreeMap::new();
+		params.insert("track".to_string(), track.to_string());
+		params.insert("artist".to_string(), artist.to_string());
+		if let Some(album) = album {
+			params.insert("album".to_string(), album.to_string());
+		}
+		if let Some(duration) = duration {
+			params.insert("duration".to_string(), duration.to_string());
+		}
+
+		self.post("track.updateNowPlaying", Some(session_key), &mut params)
+			.await?;
+		Ok(())
+	}
+
+	pub async fn scrobble(
+		&self,
+		session_key: &str,
+		tracks: &[ScrobbleTrack],
+	) -> Result<(), LastFmError> {
+		for chunk in tracks.chunks(MAX_SCROBBLES_PER_REQUEST) {
+			let mut params = BTreeMap::new();
+			for (i, track) in chunk.iter().enumerate() {
+				params.insert(format!("track[{i}]"), track.track.clone());
+				params.insert(format!("artist[{i}]"), track.artist.clone());
+				params.insert(format!("timestamp[{i}]"), track.timestamp.to_string());
+				if let Some(album) = &track.album {
+					params.insert(format!("album[{i}]"), album.clone());
+				}
+				if let Some(duration) = track.duration {
+					params.insert(format!("duration[{i}]"), duration.to_string());
+				}
+			}
+			self.post("track.scrobble", Some(session_key), &mut params)
+				.await?;
+		}
+		Ok(())
+	}
+
+	pub async fn get_session(&self, token: &str) -> Result<LastFmSession, LastFmError> {
+		let mut params = BTreeMap::new();
+		params.insert("token".to_string(), token.to_string());
+
+		let body = self.post("auth.getSession", None, &mut params).await?;
+		let data: LastFmSessionResponse = serde_json::from_value(body)?;
+		Ok(data.session)
+	}
+}
+
+#[derive(Debug, Deserialize)]
 struct LastFmTopAlbumsResponse {
-	topalbums: LastFmTopAlbums,
+	topalbums: LastFmAlbumList,
 }
 
-#[derive(Deserialize)]
-struct LastFmTopAlbums {
-	album: Vec<LastFmTopAlbum>,
+#[derive(Debug, Deserialize)]
+struct LastFmTagTopAlbumsResponse {
+	albums: LastFmAlbumList,
 }
 
-#[derive(Deserialize)]
-struct LastFmTopAlbum {
+#[derive(Debug, Deserialize)]
+struct LastFmAlbumList {
+	album: Vec<LastFmAlbumEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+struct LastFmAlbumEntry {
 	name: String,
 	artist: LastFmArtist,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 struct LastFmArtist {
 	name: String,
 }
 
-#[derive(Deserialize)]
+impl From<LastFmAlbumEntry> for LastFmAlbum {
+	fn from(entry: LastFmAlbumEntry) -> Self {
+		Self {
+			artist: entry.artist.name,
+			album: entry.name,
+		}
+	}
+}
+
+#[derive(Debug, Deserialize)]
+struct LastFmUserTopTagsResponse {
+	toptags: LastFmTopTags,
+}
+
+#[derive(Debug, Deserialize)]
+struct LastFmTopTags {
+	tag: Vec<LastFmTag>,
+}
+
+#[derive(Debug, Deserialize)]
+struct LastFmTag {
+	name: String,
+}
+
+#[derive(Debug, Deserialize)]
 struct LastFmRecentTracksResponse {
 	recenttracks: LastFmRecentTracks,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 struct LastFmRecentTracks {
 	track: Vec<LastFmRecentTrack>,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 struct LastFmRecentTrack {
 	album: LastFmText,
 	artist: LastFmText,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 struct LastFmText {
 	#[serde(rename = "#text")]
 	text: String,
 }
 
-fn sign_and_format_params(params: &mut BTreeMap<String, String>, secret: &str) {
-	let mut sig_str = String::with_capacity(256);
-	for (k, v) in params.iter() {
-		sig_str.push_str(k);
-		sig_str.push_str(v);
-	}
-	sig_str.push_str(secret);
-
-	let api_sig = format!("{:x}", md5::compute(sig_str.as_bytes()));
-	params.insert("api_sig".to_string(), api_sig);
-	params.insert("format".to_string(), "json".to_string());
-}
-
-pub async fn get_top_albums(
-	session_key: &str,
-	username: &str,
-	limit: u32,
-) -> Result<Vec<LastFmAlbum>, Box<dyn std::error::Error>> {
-	let lastfm_api_key = std::env::var("LASTFM_API_KEY")?;
-	let lastfm_api_secret = std::env::var("LASTFM_API_SECRET")?;
-
-	let mut params = BTreeMap::new();
-	params.insert("api_key".to_string(), lastfm_api_key);
-	params.insert("method".to_string(), "user.getTopAlbums".to_string());
-	params.insert("sk".to_string(), session_key.to_string());
-	params.insert("user".to_string(), username.to_string());
-	params.insert("limit".to_string(), limit.to_string());
-
-	sign_and_format_params(&mut params, &lastfm_api_secret);
-
-	let res = http_client()
-		.post("https://ws.audioscrobbler.com/2.0/")
-		.form(&params)
-		.send()
-		.await?;
-
-	let data: LastFmTopAlbumsResponse = res.json().await?;
-	Ok(data
-		.topalbums
-		.album
-		.into_iter()
-		.map(|a| LastFmAlbum {
-			artist: a.artist.name,
-			album: a.name,
-		})
-		.collect())
-}
-
-pub async fn get_random_albums(
-	session_key: &str,
-	username: &str,
-	limit: u32,
-) -> Result<Vec<LastFmAlbum>, Box<dyn std::error::Error>> {
-	let lastfm_api_key = std::env::var("LASTFM_API_KEY")?;
-	let lastfm_api_secret = std::env::var("LASTFM_API_SECRET")?;
-
-	let random_page = rand::rng().random_range(1..=10);
-
-	let mut params = BTreeMap::new();
-	params.insert("api_key".to_string(), lastfm_api_key);
-	params.insert("method".to_string(), "user.getTopAlbums".to_string());
-	params.insert("sk".to_string(), session_key.to_string());
-	params.insert("user".to_string(), username.to_string());
-	params.insert("limit".to_string(), limit.to_string());
-	params.insert("page".to_string(), random_page.to_string());
-
-	sign_and_format_params(&mut params, &lastfm_api_secret);
-
-	let res = http_client()
-		.post("https://ws.audioscrobbler.com/2.0/")
-		.form(&params)
-		.send()
-		.await?;
-
-	let data: LastFmTopAlbumsResponse = res.json().await?;
-	let mut albums: Vec<LastFmAlbum> = data
-		.topalbums
-		.album
-		.into_iter()
-		.map(|a| LastFmAlbum {
-			artist: a.artist.name,
-			album: a.name,
-		})
-		.collect();
-
-	albums.shuffle(&mut rand::rng());
-	Ok(albums)
-}
-
-pub async fn get_recent_tracks(
-	session_key: &str,
-	username: &str,
-	limit: u32,
-) -> Result<Vec<LastFmAlbum>, Box<dyn std::error::Error>> {
-	let lastfm_api_key = std::env::var("LASTFM_API_KEY")?;
-	let lastfm_api_secret = std::env::var("LASTFM_API_SECRET")?;
-
-	let mut params = BTreeMap::new();
-	params.insert("api_key".to_string(), lastfm_api_key);
-	params.insert("method".to_string(), "user.getrecenttracks".to_string());
-	params.insert("sk".to_string(), session_key.to_string());
-	params.insert("user".to_string(), username.to_string());
-	params.insert("limit".to_string(), limit.to_string());
-
-	sign_and_format_params(&mut params, &lastfm_api_secret);
-
-	let res = http_client()
-		.post("https://ws.audioscrobbler.com/2.0/")
-		.form(&params)
-		.send()
-		.await?;
-
-	let data: LastFmRecentTracksResponse = res.json().await?;
-	let mut seen = HashSet::with_capacity(limit as usize);
-	let mut albums = Vec::with_capacity(limit as usize);
-
-	for t in data.recenttracks.track {
-		if t.album.text.is_empty() || t.artist.text.is_empty() {
-			continue;
-		}
-		let key = format!("{}|{}", t.artist.text, t.album.text);
-		if seen.insert(key) {
-			albums.push(LastFmAlbum {
-				artist: t.artist.text,
-				album: t.album.text,
-			});
-		}
-	}
-
-	Ok(albums)
+#[derive(Debug, Deserialize)]
+struct LastFmSessionResponse {
+	session: LastFmSession,
 }
 
 #[derive(Clone)]
@@ -237,6 +426,17 @@ struct LinkForm {
 	username: String,
 }
 
+#[derive(Deserialize)]
+struct LinkQuery {
+	username: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct CallbackQuery {
+	token: Option<String>,
+	state: Option<String>,
+}
+
 pub fn config(cfg: &mut web::ServiceConfig) {
 	cfg.app_data(web::Data::new(TOKEN_STORE.clone()))
 		.route("/api/lastfm/link", web::get().to(link))
@@ -244,30 +444,14 @@ pub fn config(cfg: &mut web::ServiceConfig) {
 		.route("/lastfm/callback", web::get().to(callback));
 }
 
-#[derive(Deserialize)]
-struct LinkQuery {
-	username: Option<String>,
-}
-
 async fn initiate_lastfm_auth(
 	username: &str,
-	tidal_user_id: &str,
 	req: &HttpRequest,
-	manager: &TidalClientManager,
 	store: &TokenStore,
-) -> Result<String, &'static str> {
-	if !manager
-		.db
-		.verify_user_ownership(username, tidal_user_id)
-		.await
-		.unwrap_or(false)
-	{
-		return Err("User not found or does not belong to this Tidal account");
+) -> Result<String, LastFmError> {
+	if !LASTFM_CLIENT.is_configured() {
+		return Err(LastFmError::NotConfigured);
 	}
-
-	let Ok(lastfm_api_key) = std::env::var("LASTFM_API_KEY") else {
-		return Err("Last.fm integration is not configured on the server.");
-	};
 
 	let now_ms = chrono::Utc::now().timestamp_millis() as u64;
 	let state = now_ms.to_string();
@@ -282,11 +466,7 @@ async fn initiate_lastfm_auth(
 		origin,
 		urlencoding::encode(&state)
 	);
-	let auth_url = format!(
-		"https://www.last.fm/api/auth/?api_key={}&cb={}",
-		lastfm_api_key,
-		urlencoding::encode(&callback_url)
-	);
+	let auth_url = LASTFM_CLIENT.auth_url(&callback_url);
 
 	let expiration_time = now_ms + 10 * 60 * 1000;
 
@@ -301,7 +481,9 @@ async fn initiate_lastfm_auth(
 		);
 		Ok(auth_url)
 	} else {
-		Err("Failed to acquire write lock for TokenStore")
+		Err(LastFmError::Message(
+			"Failed to acquire write lock for TokenStore".to_string(),
+		))
 	}
 }
 
@@ -324,21 +506,26 @@ async fn link(
 		}));
 	};
 
-	match initiate_lastfm_auth(&username, &tidal_user_id, &req, &manager, &store).await {
+	if !manager
+		.db
+		.verify_user_ownership(&username, &tidal_user_id)
+		.await
+		.unwrap_or(false)
+	{
+		return HttpResponse::Forbidden().json(serde_json::json!({
+			"error": "User not found or does not belong to this Tidal account"
+		}));
+	}
+
+	match initiate_lastfm_auth(&username, &req, &store).await {
 		Ok(auth_url) => HttpResponse::Ok().json(serde_json::json!({
 			"link": auth_url,
 			"instructions": "Visit the link to authenticate with Last.fm and link your account."
 		})),
-		Err(err_msg) => HttpResponse::Forbidden().json(serde_json::json!({
-			"error": err_msg
+		Err(error) => HttpResponse::Forbidden().json(serde_json::json!({
+			"error": error.to_string()
 		})),
 	}
-}
-
-#[derive(Deserialize)]
-struct CallbackQuery {
-	token: Option<String>,
-	state: Option<String>,
 }
 
 async fn callback(
@@ -381,76 +568,39 @@ async fn callback(
 		}));
 	};
 
-	let lastfm_api_key = std::env::var("LASTFM_API_KEY").unwrap_or_default();
-	let lastfm_api_secret = std::env::var("LASTFM_API_SECRET").unwrap_or_default();
-
-	if lastfm_api_key.is_empty() || lastfm_api_secret.is_empty() {
-		return HttpResponse::InternalServerError().json(serde_json::json!({
-			"error": "Last.fm API credentials not configured"
-		}));
-	}
-
-	let mut params = BTreeMap::new();
-	params.insert("api_key".to_string(), lastfm_api_key);
-	params.insert("method".to_string(), "auth.getSession".to_string());
-	params.insert("token".to_string(), token);
-
-	sign_and_format_params(&mut params, &lastfm_api_secret);
-
-	let res = http_client()
-		.post("https://ws.audioscrobbler.com/2.0/")
-		.form(&params)
-		.send()
-		.await;
-
-	match res {
-		Ok(r) if r.status().is_success() => {
-			if let Ok(data) = r.json::<serde_json::Value>().await
-				&& let Some(session) = data.get("session")
+	match LASTFM_CLIENT.get_session(&token).await {
+		Ok(session) => {
+			if manager
+				.db
+				.link_lastfm_account(&state_data.username, &session.key, &session.name)
+				.await
+				.is_ok()
 			{
-				let session_key = session.get("key").and_then(|v| v.as_str()).unwrap_or("");
-				let lastfm_username = session.get("name").and_then(|v| v.as_str()).unwrap_or("");
+				tracing::debug!(
+					lastfm_username = %session.name,
+					subsonic_username = %state_data.username,
+					"Successfully linked Last.fm account"
+				);
 
-				if session_key.is_empty() || lastfm_username.is_empty() {
-					return HttpResponse::InternalServerError().json(serde_json::json!({
-						"error": "Invalid session data received from Last.fm"
-					}));
-				}
-
-				if manager
-					.db
-					.link_lastfm_account(&state_data.username, session_key, lastfm_username)
-					.await
-					.is_ok()
-				{
-					tracing::debug!(
-						lastfm_username = %lastfm_username,
-						subsonic_username = %state_data.username,
-						"Successfully linked Last.fm account"
-					);
-
-					let html = format!(
-						"<html><body><h2>Successfully linked Last.fm account {} for user {}!</h2>\
-						<p>You can close this window.</p></body></html>",
-						lastfm_username, state_data.username
-					);
-					return HttpResponse::Ok().content_type("text/html").body(html);
-				}
+				let html = format!(
+					"<html><body><h2>Successfully linked Last.fm account {} for user {}!</h2>\
+					<p>You can close this window.</p></body></html>",
+					session.name, state_data.username
+				);
+				HttpResponse::Ok().content_type("text/html").body(html)
+			} else {
+				HttpResponse::InternalServerError().json(serde_json::json!({
+					"error": "Failed to save the Last.fm link"
+				}))
 			}
 		}
-		Ok(_) => {
-			return HttpResponse::InternalServerError().json(serde_json::json!({
-				"error": "Failed to get session from Last.fm API"
-			}));
-		}
-		Err(e) => {
-			tracing::error!(error = %e, "Error fetching session key");
+		Err(error) => {
+			tracing::error!(error = %error, "Failed to exchange Last.fm token for session");
+			HttpResponse::InternalServerError().json(serde_json::json!({
+				"error": "Failed to verify token with Last.fm"
+			}))
 		}
 	}
-
-	HttpResponse::InternalServerError().json(serde_json::json!({
-		"error": "Failed to verify token with Last.fm"
-	}))
 }
 
 async fn link_form(
@@ -468,16 +618,31 @@ async fn link_form(
 			.finish();
 	};
 
-	let auth_url =
-		match initiate_lastfm_auth(&form.username, &tidal_user_id, &req, &manager, &store).await {
-			Ok(url) => url,
-			Err(err_msg) => {
-				set_flash(&session, "error", err_msg);
-				return HttpResponse::SeeOther()
-					.append_header(("Location", "/"))
-					.finish();
-			}
-		};
+	if !manager
+		.db
+		.verify_user_ownership(&form.username, &tidal_user_id)
+		.await
+		.unwrap_or(false)
+	{
+		set_flash(
+			&session,
+			"error",
+			"User not found or does not belong to this Tidal account",
+		);
+		return HttpResponse::SeeOther()
+			.append_header(("Location", "/"))
+			.finish();
+	}
+
+	let auth_url = match initiate_lastfm_auth(&form.username, &req, &store).await {
+		Ok(url) => url,
+		Err(error) => {
+			set_flash(&session, "error", &error.to_string());
+			return HttpResponse::SeeOther()
+				.append_header(("Location", "/"))
+				.finish();
+		}
+	};
 
 	if req.headers().contains_key("HX-Request") {
 		return HttpResponse::Ok()
@@ -492,101 +657,4 @@ async fn link_form(
 	HttpResponse::Found()
 		.append_header(("Location", auth_url))
 		.finish()
-}
-
-pub async fn get_top_albums_by_tags(
-	username: &str,
-	limit: u32,
-) -> Result<Vec<LastFmAlbum>, Box<dyn std::error::Error>> {
-	let lastfm_api_key = std::env::var("LASTFM_API_KEY")?;
-	let lastfm_api_secret = std::env::var("LASTFM_API_SECRET")?;
-
-	let mut tags_params = BTreeMap::new();
-	tags_params.insert("api_key".to_string(), lastfm_api_key.clone());
-	tags_params.insert("method".to_string(), "user.getTopTags".to_string());
-	tags_params.insert("user".to_string(), username.to_string());
-	tags_params.insert("limit".to_string(), "5".to_string());
-
-	sign_and_format_params(&mut tags_params, &lastfm_api_secret);
-
-	let tags_res = http_client()
-		.post("https://ws.audioscrobbler.com/2.0/")
-		.form(&tags_params)
-		.send()
-		.await?;
-
-	let tags_data: LastFmUserTopTagsResponse = tags_res.json().await?;
-
-	let fetch_futures = tags_data.toptags.tag.into_iter().map(|tag| {
-		let api_key = lastfm_api_key.clone();
-		let api_secret = lastfm_api_secret.clone();
-		let limit_str = limit.to_string();
-
-		async move {
-			let tag_name = tag.name;
-			let mut album_params = BTreeMap::new();
-			album_params.insert("api_key".to_string(), api_key);
-			album_params.insert("method".to_string(), "tag.getTopAlbums".to_string());
-			album_params.insert("tag".to_string(), tag_name.clone());
-			album_params.insert("limit".to_string(), limit_str);
-
-			sign_and_format_params(&mut album_params, &api_secret);
-
-			match http_client()
-				.post("https://ws.audioscrobbler.com/2.0/")
-				.form(&album_params)
-				.send()
-				.await
-			{
-				Ok(res) => {
-					if let Ok(data) = res.json::<LastFmTagTopAlbumsResponse>().await {
-						Some(data.albums.album)
-					} else {
-						tracing::warn!(
-							tag = %tag_name,
-							"Failed to deserialize tag.getTopAlbums JSON response"
-						);
-						None
-					}
-				}
-				Err(e) => {
-					tracing::warn!(
-						tag = %tag_name,
-						error = %e,
-						"Network request failed for tag.getTopAlbums"
-					);
-					None
-				}
-			}
-		}
-	});
-
-	let results = join_all(fetch_futures).await;
-
-	let mut albums = Vec::with_capacity(limit as usize);
-	let mut seen = HashSet::with_capacity(limit as usize);
-
-	for tag_albums in results.into_iter().flatten() {
-		for a in tag_albums {
-			if albums.len() >= limit as usize {
-				break;
-			}
-			if a.name.is_empty() || a.artist.name.is_empty() {
-				continue;
-			}
-			let key = format!("{}|{}", a.artist.name, a.name);
-			if seen.insert(key) {
-				albums.push(LastFmAlbum {
-					artist: a.artist.name,
-					album: a.name,
-				});
-			}
-		}
-
-		if albums.len() >= limit as usize {
-			break;
-		}
-	}
-
-	Ok(albums)
 }
