@@ -1,4 +1,6 @@
+use actix_web::{HttpRequest, HttpResponse, web};
 use prometheus::{HistogramOpts, HistogramVec, IntCounterVec, IntGauge, IntGaugeVec, Opts, Registry};
+use prometheus::{Encoder, TextEncoder};
 use tss_tidal::observability::TidalObserver;
 use tss_tidal::session::Session;
 
@@ -323,5 +325,86 @@ impl TidalObserver for Metrics {
 		} else {
 			self.set_cache_entries(cache, entries);
 		}
+	}
+}
+
+pub async fn endpoint(req: HttpRequest, metrics: web::Data<Metrics>) -> HttpResponse {
+	if !metrics.enabled {
+		return HttpResponse::NotFound().finish();
+	}
+
+	let is_localhost = req
+		.peer_addr()
+		.is_some_and(|addr| addr.ip().is_loopback());
+	if !is_localhost {
+		return HttpResponse::Forbidden().finish();
+	}
+
+	let mut body = Vec::new();
+	if let Err(error) = TextEncoder::new().encode(&metrics.registry.gather(), &mut body) {
+		tracing::error!(%error, "Failed to encode Prometheus metrics");
+		return HttpResponse::InternalServerError().finish();
+	}
+
+	HttpResponse::Ok()
+		.content_type("text/plain; version=0.0.4; charset=utf-8")
+		.body(body)
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use actix_web::{App, http::StatusCode, test};
+	use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+
+	#[actix_web::test]
+	async fn test_metrics_endpoint_allows_ipv4_localhost() {
+		let app = test::init_service(
+			App::new()
+				.app_data(web::Data::new(Metrics::new(true).expect("metrics")))
+				.route("/metrics", web::get().to(endpoint)),
+		)
+		.await;
+		let request = test::TestRequest::get()
+			.uri("/metrics")
+			.peer_addr(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 1234))
+			.to_request();
+
+		let response = test::call_service(&app, request).await;
+		assert_eq!(response.status(), StatusCode::OK);
+	}
+
+	#[actix_web::test]
+	async fn test_metrics_endpoint_allows_ipv6_localhost() {
+		let app = test::init_service(
+			App::new()
+				.app_data(web::Data::new(Metrics::new(true).expect("metrics")))
+				.route("/metrics", web::get().to(endpoint)),
+		)
+		.await;
+		let request = test::TestRequest::get()
+			.uri("/metrics")
+			.peer_addr(SocketAddr::new(IpAddr::V6(std::net::Ipv6Addr::LOCALHOST), 1234))
+			.to_request();
+
+		let response = test::call_service(&app, request).await;
+		assert_eq!(response.status(), StatusCode::OK);
+	}
+
+	#[actix_web::test]
+	async fn test_metrics_endpoint_rejects_non_localhost() {
+		let app = test::init_service(
+			App::new()
+				.app_data(web::Data::new(Metrics::new(true).expect("metrics")))
+				.route("/metrics", web::get().to(endpoint)),
+		)
+		.await;
+		let request = test::TestRequest::get()
+			.uri("/metrics")
+			.peer_addr(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)), 1234))
+			.to_request();
+
+		let response = test::call_service(&app, request).await;
+		assert_eq!(response.status(), StatusCode::FORBIDDEN);
 	}
 }

@@ -18,7 +18,7 @@ This is an open-source verison of an old project of mine, based on the Subsonic 
 
 ### Integrations
 *   **Last.fm:** link your last.fm account via oauth to generate dynamic, personalized Subsonic feeds (Random, Recent, and Frequent albums) based on your scrobble history.
-*   **Prometheus:** set `PROMETHEUS_ENABLED=true` to expose HTTP latency/counts, Subsonic authentication outcomes, Tidal client cache efficiency, loaded client sessions, playback outcomes, and proxied audio bytes at `GET /metrics`. Metrics are disabled by default.
+*   **Prometheus:** set `PROMETHEUS_ENABLED=true` to expose HTTP latency/counts, Subsonic authentication outcomes, Tidal client cache efficiency, loaded client sessions, playback outcomes, and proxied audio bytes at `GET /metrics`. Metrics are disabled by default and `/metrics` is only accessible from localhost. A local reverse proxy must not expose this route publicly.
 
 Prometheus exports the following service-specific metric families:
 

@@ -102,7 +102,7 @@ async fn main() -> std::io::Result<()> {
 	info!("Starting server on {}", bind_addr);
 	let prometheus_enabled = app_config.prometheus_enabled;
 	let prometheus = PrometheusMetricsBuilder::new("tss")
-		.endpoint("/metrics")
+		.exclude("/metrics")
 		.mask_unmatched_patterns("UNKNOWN")
 		.registry(metrics.registry.clone())
 		.build()
@@ -135,6 +135,7 @@ async fn main() -> std::io::Result<()> {
 			.app_data(tidal_manager_data.clone())
 			.app_data(db_manager_data.clone())
 			.app_data(metrics_data.clone())
+			.route("/metrics", web::get().to(metrics::endpoint))
 			.route("/health", web::get().to(api::health::health_check))
 			.configure(api::auth::config)
 			.configure(api::lastfm::config)
