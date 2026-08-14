@@ -209,6 +209,8 @@ impl TidalApi {
 	}
 
 	async fn get_cached_entity<T, F, Fut>(
+		&self,
+		cache_name: &'static str,
 		cache: &moka::future::Cache<i64, T>,
 		id: i64,
 		fetch: F,
@@ -219,15 +221,21 @@ impl TidalApi {
 		Fut: std::future::Future<Output = Result<T, TidalError>>,
 	{
 		if let Some(entity) = cache.get(&id).await {
+			self.session
+				.observe_cache_access(cache_name, "hit", cache.entry_count());
 			return Ok(entity);
 		}
+		self.session
+			.observe_cache_access(cache_name, "miss", cache.entry_count());
 		let entity = fetch().await?;
 		cache.insert(id, entity.clone()).await;
+		self.session
+			.observe_cache_access(cache_name, "insert", cache.entry_count());
 		Ok(entity)
 	}
 
 	pub async fn get_album(&self, album_id: i64) -> Result<Album, TidalError> {
-		Self::get_cached_entity(&ALBUM_CACHE, album_id, || async {
+		self.get_cached_entity("album", &ALBUM_CACHE, album_id, || async {
 			self.session
 				.request::<Album>(
 					Method::GET,
@@ -242,7 +250,7 @@ impl TidalApi {
 	}
 
 	pub async fn get_track(&self, track_id: i64) -> Result<Track, TidalError> {
-		Self::get_cached_entity(&TRACK_CACHE, track_id, || async {
+		self.get_cached_entity("track", &TRACK_CACHE, track_id, || async {
 			self.session
 				.request::<Track>(
 					Method::GET,
@@ -285,7 +293,7 @@ impl TidalApi {
 	}
 
 	pub async fn get_artist(&self, artist_id: i64) -> Result<Artist, TidalError> {
-		Self::get_cached_entity(&ARTIST_CACHE, artist_id, || async {
+		self.get_cached_entity("artist", &ARTIST_CACHE, artist_id, || async {
 			self.session
 				.request::<Artist>(
 					Method::GET,

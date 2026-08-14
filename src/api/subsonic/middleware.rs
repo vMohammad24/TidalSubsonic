@@ -1,4 +1,5 @@
 use crate::db::DbManager;
+use crate::metrics::Metrics;
 use crate::tidal::{api::TidalApi, manager::TidalClientManager};
 use crate::util::crypto;
 use actix_web::error::ErrorUnauthorized;
@@ -51,6 +52,12 @@ impl SubsonicContext {
 
 pub struct SubsonicAuth;
 
+fn record_auth_attempt(metrics: Option<&Metrics>, outcome: &'static str) {
+	if let Some(metrics) = metrics {
+		metrics.record_auth_attempt(outcome);
+	}
+}
+
 impl<S, B> Transform<S, ServiceRequest> for SubsonicAuth
 where
 	S: Service<
@@ -96,6 +103,9 @@ where
 
 	fn call(&self, req: ServiceRequest) -> Self::Future {
 		let service = self.service.clone();
+		let metrics = req
+			.app_data::<web::Data<Metrics>>()
+			.map(|metrics| metrics.get_ref().clone());
 
 		let path = req.path();
 		let query_string = req.query_string();
@@ -104,6 +114,7 @@ where
 		match auth_res {
 			Ok(query) => {
 				if query.validate().is_err() {
+					record_auth_attempt(metrics.as_ref(), "invalid_request");
 					return Box::pin(async move {
 						Err(ErrorUnauthorized("Invalid request parameters"))
 					});
@@ -133,6 +144,7 @@ where
 					|| path.ends_with("/ping.view")
 					|| path.ends_with("/ping")
 				{
+					record_auth_attempt(metrics.as_ref(), "bypassed");
 					return Box::pin(async move { service.call(req).await });
 				}
 
@@ -172,6 +184,7 @@ where
 						}
 
 						if !authenticated {
+							record_auth_attempt(metrics.as_ref(), "invalid_credentials");
 							tracing::warn!(username = %username, "Subsonic authentication failure");
 							let err = ErrorUnauthorized("Authentication required");
 							return Err(err);
@@ -190,11 +203,13 @@ where
 							match manager.get_client_for_subsonic_user(&username).await {
 								Ok(session) => TidalApi::new(session),
 								Err(e) => {
+									record_auth_attempt(metrics.as_ref(), "tidal_unavailable");
 									let err = ErrorUnauthorized(e.to_string());
 									return Err(err);
 								}
 							}
 						} else {
+							record_auth_attempt(metrics.as_ref(), "tidal_unavailable");
 							let err = ErrorUnauthorized("Tidal client manager not available");
 							return Err(err);
 						};
@@ -206,16 +221,20 @@ where
 							use_playlists,
 							use_favorites,
 						});
+						record_auth_attempt(metrics.as_ref(), "success");
 
 						service.call(req).await
 					}
 					.instrument(span),
 				)
 			}
-			Err(_) => Box::pin(async move {
-				let err = ErrorUnauthorized("Invalid request parameters");
-				Err(err)
-			}),
+			Err(_) => {
+				record_auth_attempt(metrics.as_ref(), "invalid_request");
+				Box::pin(async move {
+					let err = ErrorUnauthorized("Invalid request parameters");
+					Err(err)
+				})
+			}
 		}
 	}
 }

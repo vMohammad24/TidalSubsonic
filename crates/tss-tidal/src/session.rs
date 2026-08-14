@@ -4,6 +4,7 @@ use crate::tidal::{
 	models::{AudioMode, Quality, VideoQuality},
 };
 use crate::util::http_client;
+use crate::observability::{NoopTidalObserver, TidalObserver};
 use chrono::Utc;
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
@@ -70,6 +71,55 @@ pub struct Session {
 	pub options: Arc<RwLock<SessionOptions>>,
 	pub user_id: Option<i64>,
 	pub token_update_tx: Option<Sender<TokenUpdate>>,
+	observer: Arc<dyn TidalObserver>,
+}
+
+struct RequestObservation {
+	observer: Arc<dyn TidalObserver>,
+	api_version: &'static str,
+	method: &'static str,
+	started_at: std::time::Instant,
+	finished: bool,
+}
+
+impl RequestObservation {
+	fn new(
+		observer: Arc<dyn TidalObserver>,
+		api_version: &'static str,
+		method: &'static str,
+	) -> Self {
+		observer.request_started(api_version, method);
+		Self {
+			observer,
+			api_version,
+			method,
+			started_at: std::time::Instant::now(),
+			finished: false,
+		}
+	}
+
+	fn finish(mut self, outcome: &'static str) {
+		self.observer.request_finished(
+			self.api_version,
+			self.method,
+			outcome,
+			self.started_at.elapsed().as_secs_f64(),
+		);
+		self.finished = true;
+	}
+}
+
+impl Drop for RequestObservation {
+	fn drop(&mut self) {
+		if !self.finished {
+			self.observer.request_finished(
+				self.api_version,
+				self.method,
+				"cancelled",
+				self.started_at.elapsed().as_secs_f64(),
+			);
+		}
+	}
 }
 
 impl Session {
@@ -87,7 +137,22 @@ impl Session {
 			})),
 			user_id: None,
 			token_update_tx,
+			observer: Arc::new(NoopTidalObserver),
 		}
+	}
+
+	pub fn with_observer(mut self, observer: Arc<dyn TidalObserver>) -> Self {
+		self.observer = observer;
+		self
+	}
+
+	pub(crate) fn observe_cache_access(
+		&self,
+		cache: &'static str,
+		result: &'static str,
+		entries: u64,
+	) {
+		self.observer.cache_access(cache, result, entries);
 	}
 
 	pub async fn device_authorization(&self) -> Result<DeviceAuthorizationResponse, TidalError> {
@@ -235,6 +300,38 @@ impl Session {
 		json: Option<serde_json::Value>,
 		api_version: ApiVersion,
 	) -> Result<T, TidalError> {
+		let api_version_label = api_version.as_label();
+		let method_label = method_label(&method);
+		let observation = RequestObservation::new(
+			Arc::clone(&self.observer),
+			api_version_label,
+			method_label,
+		);
+		let result = self
+			.request_full_inner(method, path, query, form, json, api_version)
+			.await;
+		let outcome = match &result {
+			Ok(_) => "success",
+			Err(TidalError::Authentication(_)) => "authentication_error",
+			Err(TidalError::RateLimit) => "rate_limited",
+			Err(TidalError::ResourceNotFound(_, _)) => "not_found",
+			Err(TidalError::PaymentRequired) => "payment_required",
+			Err(TidalError::ApiError(_, _)) => "api_error",
+			Err(_) => "transport_error",
+		};
+		observation.finish(outcome);
+		result
+	}
+
+	async fn request_full_inner<T: for<'de> Deserialize<'de>>(
+		&self,
+		method: Method,
+		path: &str,
+		query: Option<&[(&str, &str)]>,
+		form: Option<&[(&str, String)]>,
+		json: Option<serde_json::Value>,
+		api_version: ApiVersion,
+	) -> Result<T, TidalError> {
 		let (use_oauth, use_session_id) = {
 			let opts = self.options.read().unwrap_or_else(|e| e.into_inner());
 			let u_oauth = opts.access_token.is_some();
@@ -339,6 +436,13 @@ impl Session {
 	}
 
 	pub async fn refresh_access_token(&self) -> Result<TokenResponse, TidalError> {
+		let result = self.refresh_access_token_inner().await;
+		self.observer
+			.auth_refresh_finished(if result.is_ok() { "success" } else { "error" });
+		result
+	}
+
+	async fn refresh_access_token_inner(&self) -> Result<TokenResponse, TidalError> {
 		let (refresh_token, client_id, client_secret) = {
 			let opts = self.options.read().unwrap_or_else(|e| e.into_inner());
 			let refresh_token = match &opts.refresh_token {
@@ -470,5 +574,28 @@ impl Session {
 		}
 
 		Ok(token_resp)
+	}
+}
+
+impl ApiVersion {
+	fn as_label(self) -> &'static str {
+		match self {
+			Self::V1 => "v1",
+			Self::V2 => "v2",
+			Self::OpenApi => "openapi",
+			Self::Desktop => "desktop_v1",
+			Self::DesktopV2 => "desktop_v2",
+		}
+	}
+}
+
+fn method_label(method: &Method) -> &'static str {
+	match *method {
+		Method::GET => "GET",
+		Method::POST => "POST",
+		Method::PUT => "PUT",
+		Method::DELETE => "DELETE",
+		Method::PATCH => "PATCH",
+		_ => "OTHER",
 	}
 }

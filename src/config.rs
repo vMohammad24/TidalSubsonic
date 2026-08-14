@@ -1,5 +1,14 @@
 use serde::Deserialize;
 
+fn env_flag_enabled(value: Option<&str>) -> bool {
+	value.is_some_and(|value| {
+		matches!(
+			value.trim().to_ascii_lowercase().as_str(),
+			"1" | "true" | "yes"
+		)
+	})
+}
+
 #[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize)]
 pub struct AppConfig {
@@ -11,6 +20,7 @@ pub struct AppConfig {
 	pub max_http_retries: u32,
 	pub dash_stream_concurrency: usize,
 	pub cache_ttl_secs: u64,
+	pub prometheus_enabled: bool,
 }
 
 impl AppConfig {
@@ -41,6 +51,9 @@ impl AppConfig {
 				.unwrap_or_else(|_| "300".into())
 				.parse()
 				.unwrap_or(300),
+			prometheus_enabled: env_flag_enabled(
+				std::env::var("PROMETHEUS_ENABLED").ok().as_deref(),
+			),
 		}
 	}
 }
@@ -56,5 +69,19 @@ mod tests {
 		assert!(config.port > 0);
 		assert!(!config.default_country_code.is_empty());
 		assert!(config.request_timeout_secs > 0);
+	}
+
+	#[test]
+	fn test_env_flag_accepts_enabled_values() {
+		for value in ["1", "true", "TRUE", "yes", " Yes "] {
+			assert!(env_flag_enabled(Some(value)));
+		}
+	}
+
+	#[test]
+	fn test_env_flag_rejects_disabled_or_invalid_values() {
+		for value in [None, Some("0"), Some("false"), Some("no"), Some("")] {
+			assert!(!env_flag_enabled(value));
+		}
 	}
 }

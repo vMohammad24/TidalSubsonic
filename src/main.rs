@@ -1,7 +1,9 @@
 use actix_session::SessionMiddleware;
 use actix_session::storage::CookieSessionStore;
 use actix_web::cookie::Key;
+use actix_web::middleware::Condition;
 use actix_web::{App, HttpServer, web};
+use actix_web_prom::PrometheusMetricsBuilder;
 use dotenvy::dotenv;
 use sha2::{Digest, Sha512};
 use std::env;
@@ -13,6 +15,7 @@ use tracing_subscriber::{EnvFilter, FmtSubscriber};
 mod api;
 mod config;
 mod db;
+mod metrics;
 mod tidal;
 mod util;
 
@@ -86,14 +89,27 @@ async fn main() -> std::io::Result<()> {
 	};
 
 	let cancel_token = CancellationToken::new();
+	let metrics = metrics::Metrics::new(app_config.prometheus_enabled)
+		.map_err(|error| std::io::Error::other(format!("failed to initialize metrics: {error}")))?;
 	let (tidal_manager, token_drain_handle) = tidal::manager::TidalClientManager::new(
 		&app_config.default_country_code,
 		Arc::new(db_manager.clone()),
 		cancel_token.clone(),
+		metrics.clone(),
 	);
 
 	let bind_addr = format!("{}:{}", app_config.host, app_config.port);
 	info!("Starting server on {}", bind_addr);
+	let prometheus_enabled = app_config.prometheus_enabled;
+	let prometheus = PrometheusMetricsBuilder::new("tss")
+		.endpoint("/metrics")
+		.mask_unmatched_patterns("UNKNOWN")
+		.registry(metrics.registry.clone())
+		.build()
+		.map_err(|error| std::io::Error::other(format!("failed to initialize metrics: {error}")))?;
+	if prometheus_enabled {
+		info!("Prometheus metrics enabled at /metrics");
+	}
 
 	let cancel_token_clone = cancel_token.clone();
 	tokio::spawn(async move {
@@ -106,9 +122,11 @@ async fn main() -> std::io::Result<()> {
 	let app_config_data = web::Data::new(app_config);
 	let tidal_manager_data = web::Data::new(tidal_manager);
 	let db_manager_data = web::Data::new(db_manager);
+	let metrics_data = web::Data::new(metrics);
 
 	let server_res = HttpServer::new(move || {
 		App::new()
+			.wrap(Condition::new(prometheus_enabled, prometheus.clone()))
 			.wrap(SessionMiddleware::new(
 				CookieSessionStore::default(),
 				secret_key.clone(),
@@ -116,6 +134,7 @@ async fn main() -> std::io::Result<()> {
 			.app_data(app_config_data.clone())
 			.app_data(tidal_manager_data.clone())
 			.app_data(db_manager_data.clone())
+			.app_data(metrics_data.clone())
 			.route("/health", web::get().to(api::health::health_check))
 			.configure(api::auth::config)
 			.configure(api::lastfm::config)

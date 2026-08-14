@@ -18,6 +18,17 @@ This is an open-source verison of an old project of mine, based on the Subsonic 
 
 ### Integrations
 *   **Last.fm:** link your last.fm account via oauth to generate dynamic, personalized Subsonic feeds (Random, Recent, and Frequent albums) based on your scrobble history.
+*   **Prometheus:** set `PROMETHEUS_ENABLED=true` to expose HTTP latency/counts, Subsonic authentication outcomes, Tidal client cache efficiency, loaded client sessions, playback outcomes, and proxied audio bytes at `GET /metrics`. Metrics are disabled by default.
+
+Prometheus exports the following service-specific metric families:
+
+- HTTP: `tss_http_requests_total`, `tss_http_requests_duration_seconds`
+- Tidal: `tss_tidal_requests_total`, `tss_tidal_request_duration_seconds`, `tss_tidal_errors_total`, `tss_tidal_requests_in_flight`, `tss_tidal_auth_refreshes_total`
+- Playback: `tss_playback_active_streams`, `tss_playback_requests_total`, `tss_playback_bytes_total`, `tss_playback_startup_duration_seconds`
+- Cache: `tss_cache_accesses_total`, `tss_cache_entries`, `tss_cache_evictions_total`
+- Authentication: `tss_subsonic_auth_attempts_total`
+- State: `tss_tidal_clients_loaded`
+- Process (Linux): `process_cpu_seconds_total`, `process_resident_memory_bytes`, `process_virtual_memory_bytes`, `process_open_fds`, `process_max_fds`, `process_start_time_seconds`, `process_threads`
 
 ### User Management
 *   **Multi-User Sharing:** create multiple Subsonic user profiles that all piggyback off a single linked Tidal master account (having the ability to share your account with friends).

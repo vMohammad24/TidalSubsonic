@@ -4,6 +4,7 @@ use std::time::Duration;
 use tokio::sync::RwLock;
 
 use crate::db::DbManager;
+use crate::metrics::Metrics;
 use crate::tidal::{
 	error::TidalError,
 	session::{Session, SessionOptions, TokenUpdate},
@@ -11,6 +12,7 @@ use crate::tidal::{
 use crate::util::crypto::{decrypt_string, encrypt_string};
 use chrono::{TimeZone, Utc};
 use moka::future::Cache;
+use moka::notification::RemovalCause;
 use tokio::sync::mpsc::{Sender, channel};
 
 #[derive(Clone)]
@@ -21,6 +23,7 @@ pub struct TidalClientManager {
 	pub db: Arc<DbManager>,
 	token_update_tx: Sender<TokenUpdate>,
 	subsonic_user_cache: Cache<String, Arc<Session>>,
+	metrics: Metrics,
 }
 
 use tokio_util::sync::CancellationToken;
@@ -30,6 +33,7 @@ impl TidalClientManager {
 		default_country_code: &str,
 		db: Arc<DbManager>,
 		cancel_token: CancellationToken,
+		metrics: Metrics,
 	) -> (Self, tokio::task::JoinHandle<()>) {
 		let (tx, mut rx) = channel::<TokenUpdate>(100);
 		let db_clone = db.clone();
@@ -61,18 +65,32 @@ impl TidalClientManager {
 			country_code: Some(default_country_code.to_string()),
 			..Default::default()
 		};
+		let global_client =
+			metrics.observe_tidal_session(Session::new(global_options, Some(tx.clone())));
+		let eviction_metrics = metrics.clone();
+		let subsonic_user_cache = Cache::builder()
+			.time_to_live(Duration::from_secs(300))
+			.max_capacity(1000)
+			.eviction_listener(move |_, _, cause| {
+				let cause = match cause {
+					RemovalCause::Expired => "expired",
+					RemovalCause::Explicit => "explicit",
+					RemovalCause::Replaced => "replaced",
+					RemovalCause::Size => "size",
+				};
+				eviction_metrics.record_cache_eviction("subsonic_user", cause);
+			})
+			.build();
 
 		(
 			Self {
 				user_clients: Arc::new(RwLock::new(HashMap::new())),
-				global_client: Arc::new(Session::new(global_options, Some(tx.clone()))),
+				global_client: Arc::new(global_client),
 				default_country_code: default_country_code.to_string(),
 				db,
 				token_update_tx: tx,
-				subsonic_user_cache: Cache::builder()
-					.time_to_live(Duration::from_secs(300))
-					.max_capacity(1000)
-					.build(),
+				subsonic_user_cache,
+				metrics,
 			},
 			handle,
 		)
@@ -109,8 +127,10 @@ impl TidalClientManager {
 		subsonic_username: &str,
 	) -> Result<Arc<Session>, TidalError> {
 		if let Some(client) = self.subsonic_user_cache.get(subsonic_username).await {
+			self.record_subsonic_cache_access("hit");
 			return Ok(client);
 		}
+		self.record_subsonic_cache_access("miss");
 
 		let Some(tidal_id) = self
 			.db
@@ -127,6 +147,7 @@ impl TidalClientManager {
 		self.subsonic_user_cache
 			.insert(subsonic_username.to_string(), Arc::clone(&client))
 			.await;
+		self.update_cache_entries();
 		Ok(client)
 	}
 
@@ -136,8 +157,12 @@ impl TidalClientManager {
 	) -> Result<Arc<Session>, TidalError> {
 		let clients = self.user_clients.read().await;
 		if let Some(client) = clients.get(tidal_user_id) {
+			self.metrics
+				.record_cache_access("tidal_user", "hit", clients.len() as u64);
 			return Ok(Arc::clone(client));
 		}
+		self.metrics
+			.record_cache_access("tidal_user", "miss", clients.len() as u64);
 		drop(clients);
 
 		let stored_tokens = self
@@ -170,17 +195,22 @@ impl TidalClientManager {
 			..Default::default()
 		};
 
-		let mut session = Session::new(options, Some(self.token_update_tx.clone()));
+		let mut session = self.metrics.observe_tidal_session(Session::new(
+			options,
+			Some(self.token_update_tx.clone()),
+		));
 		if let Ok(id) = tidal_user_id.parse::<i64>() {
 			session.user_id = Some(id);
 		}
 		let client = Arc::new(session);
 
 		let mut clients_write = self.user_clients.write().await;
-		Ok(clients_write
+		let client = clients_write
 			.entry(tidal_user_id.to_string())
 			.or_insert(client)
-			.clone())
+			.clone();
+		self.metrics.set_tidal_clients_loaded(clients_write.len());
+		Ok(client)
 	}
 
 	pub async fn save_tokens_for_tidal_user(
@@ -211,16 +241,31 @@ impl TidalClientManager {
 	pub async fn clear_tokens_for_tidal_user(&self, tidal_user_id: &str) -> Result<(), TidalError> {
 		let mut clients = self.user_clients.write().await;
 		clients.remove(tidal_user_id);
+		self.metrics.set_tidal_clients_loaded(clients.len());
 
 		if let Ok(users) = self.db.list_users_for_tidal_account(tidal_user_id).await {
 			for u in users {
 				self.subsonic_user_cache.invalidate(&u).await;
 			}
 		}
+		self.update_cache_entries();
 
 		self.db
 			.delete_tokens(tidal_user_id)
 			.await
 			.map_err(|e| TidalError::Unexpected(e.to_string()))
+	}
+
+	fn update_cache_entries(&self) {
+		self.metrics
+			.set_cache_entries("subsonic_user", self.subsonic_user_cache.entry_count());
+	}
+
+	fn record_subsonic_cache_access(&self, result: &'static str) {
+		self.metrics.record_cache_access(
+			"subsonic_user",
+			result,
+			self.subsonic_user_cache.entry_count(),
+		);
 	}
 }

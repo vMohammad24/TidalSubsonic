@@ -8,6 +8,7 @@ use tokio_util::io::ReaderStream;
 
 use crate::api::subsonic::models::SubsonicResponseWrapper;
 use crate::api::subsonic::response::SubsonicResponder;
+use crate::metrics::Metrics;
 use crate::tidal::models::PlaybackInfo;
 use crate::util::http_client;
 
@@ -449,11 +450,14 @@ pub async fn download(
 pub async fn stream(
 	query: web::Query<StreamQuery>,
 	subsonic_ctx: actix_web::web::ReqData<crate::api::subsonic::middleware::SubsonicContext>,
+	metrics: web::Data<Metrics>,
 ) -> HttpResponse {
+	let startup_started_at = std::time::Instant::now();
 	let api = &subsonic_ctx.tidal_api;
 	let id = match query.id.parse::<i64>() {
 		Ok(i) => i,
 		Err(e) => {
+			metrics.record_playback_outcome("invalid_track_id");
 			tracing::error!("Failed to parse id: {}", e);
 			return HttpResponse::NotFound().finish();
 		}
@@ -462,6 +466,7 @@ pub async fn stream(
 	let playback_info = match api.get_stream_url(id).await {
 		Ok(info) => info,
 		Err(e) => {
+			metrics.record_playback_outcome("tidal_error");
 			tracing::error!("Failed to fetch stream_url: {}", e);
 			return HttpResponse::NotFound().finish();
 		}
@@ -470,6 +475,7 @@ pub async fn stream(
 	let manifest_b64 = match playback_info.manifest {
 		Some(m) => m,
 		None => {
+			metrics.record_playback_outcome("missing_manifest");
 			tracing::error!("No manifest found in playback info");
 			return HttpResponse::NotFound().finish();
 		}
@@ -478,6 +484,7 @@ pub async fn stream(
 	let decoded = match general_purpose::STANDARD.decode(&manifest_b64) {
 		Ok(d) => d,
 		Err(e) => {
+			metrics.record_playback_outcome("invalid_manifest");
 			tracing::error!("Failed to decode base64 manifest: {}", e);
 			return HttpResponse::NotFound().finish();
 		}
@@ -495,6 +502,7 @@ pub async fn stream(
 			}
 		};
 		if let Some(u) = manifest.urls.first() {
+			metrics.record_playback_started("redirect", startup_started_at);
 			return HttpResponse::Found()
 				.append_header(("Location", u.as_str()))
 				.finish();
@@ -510,8 +518,22 @@ pub async fn stream(
 					manifest.mime_type
 				};
 
-				let stream = build_dash_segment_stream(urls, client, 3);
-
+				metrics.record_playback_started("proxied", startup_started_at);
+				let stream_metrics = metrics.get_ref().clone();
+				let stream = build_dash_segment_stream(urls, client, 3).inspect_ok(move |bytes| {
+					stream_metrics.record_playback_bytes("dash", bytes.len());
+				});
+				let active_stream = metrics.start_playback_stream();
+				let stream = Box::pin(stream);
+				let stream = stream::unfold(
+					(stream, active_stream),
+					|(mut stream, active_stream)| async move {
+						stream
+							.next()
+							.await
+							.map(|item| (item, (stream, active_stream)))
+					},
+				);
 				return HttpResponse::Ok()
 					.content_type(content_type)
 					.streaming(stream);
@@ -525,6 +547,7 @@ pub async fn stream(
 	}
 
 	tracing::error!("Could not extract URL from manifest");
+	metrics.record_playback_outcome("unsupported_manifest");
 	HttpResponse::NotFound().finish()
 }
 

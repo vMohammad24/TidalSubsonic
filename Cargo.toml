@@ -21,6 +21,8 @@ serde_qs = { version = "1", features = ["actix4"] }
 
 actix-web = "4.13"
 actix-session = { version = "0.11", features = ["cookie-session"] }
+actix-web-prom = "0.10"
+prometheus = { version = "0.14", features = ["process"] }
 askama = { version = "0.16" }
 
 
