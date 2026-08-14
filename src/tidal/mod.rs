@@ -1,7 +1,6 @@
-pub mod api;
-pub mod config;
-pub mod error;
-pub mod favorites;
 pub mod manager;
-pub mod models;
-pub mod session;
+
+pub use tss_tidal::{api, config, error, favorites, models, session};
+
+#[cfg(test)]
+mod tests;

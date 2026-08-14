@@ -3,7 +3,13 @@ name = "tss"
 version = "0.1.0"
 edition = "2024"
 
+[workspace]
+members = ["crates/tss-tidal"]
+resolver = "3"
+
 [dependencies]
+tss-tidal = { path = "crates/tss-tidal", features = ["actix-web"] }
+
 tokio = { version = "1", features = ["macros"] }
 
 serde = { version = "1", features = ["derive"] }

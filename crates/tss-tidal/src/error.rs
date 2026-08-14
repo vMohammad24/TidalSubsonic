@@ -1,5 +1,7 @@
-use actix_web::{HttpResponse, ResponseError, http::StatusCode};
 use thiserror::Error;
+
+#[cfg(feature = "actix-web")]
+use actix_web::{HttpResponse, ResponseError, http::StatusCode};
 
 #[derive(Error, Debug)]
 pub enum TidalError {
@@ -28,6 +30,7 @@ pub enum TidalError {
 	Unexpected(String),
 }
 
+#[cfg(feature = "actix-web")]
 impl ResponseError for TidalError {
 	fn status_code(&self) -> StatusCode {
 		match self {
@@ -49,7 +52,7 @@ impl ResponseError for TidalError {
 	}
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "actix-web"))]
 mod tests {
 	use super::*;
 

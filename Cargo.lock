@@ -3194,9 +3194,26 @@ dependencies = [
  "tokio-util",
  "tracing",
  "tracing-subscriber",
+ "tss-tidal",
  "urlencoding",
  "uuid",
  "validator",
+]
+
+[[package]]
+name = "tss-tidal"
+version = "0.1.0"
+dependencies = [
+ "actix-web",
+ "chrono",
+ "dotenvy",
+ "moka",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
