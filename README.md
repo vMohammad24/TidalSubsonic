@@ -36,12 +36,11 @@ Prometheus exports the following service-specific metric families:
 *   **Authentication:** secure user authentication with full encryption of tidal tokens (access/refresh) and subsonic user passwords.
 
 ## TODO
-- [ ] **Playlists:** implement adding/removing tracks to a playlist.
+- [ ] **Playlists:** implement adding/removing tracks to a tidal playlist.
 - [ ] **API Migration:** migrate from old Tidal APIs to the OpenAPI endpoints (mostly just search).
-- [ ] **Local Playlists/Favorites:** allow toggling favorites & playlists from the local database instead of syncing directly from Tidal (like old tss).
-- [ ] **Radio / Mixes:** implement `getInternetRadioStations` to return user mixes (or last.fm recommendations?).
 - [ ] **OpenSubsonic Extensions:** implement extensions (`apiKeyAuth`, `songLyrics`, `indexBasedQueue`, `formPost`).
-- [ ] **Testing:** add unit/integration tests.
+- [x] **Local Playlists/Favorites:** allow toggling favorites & playlists from the local database instead of syncing directly from Tidal (like old tss).
+- [x] **Testing:** add unit/integration tests.
 
 
 ## LICENSE
