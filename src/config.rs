@@ -21,6 +21,7 @@ pub struct AppConfig {
 	pub dash_stream_concurrency: usize,
 	pub cache_ttl_secs: u64,
 	pub prometheus_enabled: bool,
+	pub prometheus_port: u16,
 }
 
 impl AppConfig {
@@ -54,6 +55,10 @@ impl AppConfig {
 			prometheus_enabled: env_flag_enabled(
 				std::env::var("PROMETHEUS_ENABLED").ok().as_deref(),
 			),
+			prometheus_port: std::env::var("PROMETHEUS_PORT")
+				.unwrap_or_else(|_| "9090".into())
+				.parse()
+				.unwrap_or(9090),
 		}
 	}
 }
@@ -69,6 +74,7 @@ mod tests {
 		assert!(config.port > 0);
 		assert!(!config.default_country_code.is_empty());
 		assert!(config.request_timeout_secs > 0);
+		assert!(config.prometheus_port > 0);
 	}
 
 	#[test]

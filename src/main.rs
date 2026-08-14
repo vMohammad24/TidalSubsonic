@@ -101,15 +101,13 @@ async fn main() -> std::io::Result<()> {
 	let bind_addr = format!("{}:{}", app_config.host, app_config.port);
 	info!("Starting server on {}", bind_addr);
 	let prometheus_enabled = app_config.prometheus_enabled;
+	let prometheus_port = app_config.prometheus_port;
 	let prometheus = PrometheusMetricsBuilder::new("tss")
 		.exclude("/metrics")
 		.mask_unmatched_patterns("UNKNOWN")
 		.registry(metrics.registry.clone())
 		.build()
 		.map_err(|error| std::io::Error::other(format!("failed to initialize metrics: {error}")))?;
-	if prometheus_enabled {
-		info!("Prometheus metrics enabled at /metrics");
-	}
 
 	let cancel_token_clone = cancel_token.clone();
 	tokio::spawn(async move {
@@ -122,9 +120,9 @@ async fn main() -> std::io::Result<()> {
 	let app_config_data = web::Data::new(app_config);
 	let tidal_manager_data = web::Data::new(tidal_manager);
 	let db_manager_data = web::Data::new(db_manager);
-	let metrics_data = web::Data::new(metrics);
+	let metrics_data = web::Data::new(metrics.clone());
 
-	let server_res = HttpServer::new(move || {
+	let server = HttpServer::new(move || {
 		App::new()
 			.wrap(Condition::new(prometheus_enabled, prometheus.clone()))
 			.wrap(SessionMiddleware::new(
@@ -135,7 +133,6 @@ async fn main() -> std::io::Result<()> {
 			.app_data(tidal_manager_data.clone())
 			.app_data(db_manager_data.clone())
 			.app_data(metrics_data.clone())
-			.route("/metrics", web::get().to(metrics::endpoint))
 			.route("/health", web::get().to(api::health::health_check))
 			.configure(api::auth::config)
 			.configure(api::lastfm::config)
@@ -145,8 +142,36 @@ async fn main() -> std::io::Result<()> {
 	})
 	.shutdown_timeout(30)
 	.bind(bind_addr)?
-	.run()
-	.await;
+	.run();
+
+	let metrics_server = if prometheus_enabled {
+		let metrics_data = web::Data::new(metrics.clone());
+		let server = HttpServer::new(move || {
+			App::new()
+				.app_data(metrics_data.clone())
+				.route("/metrics", web::get().to(metrics::endpoint))
+		})
+		.shutdown_timeout(5)
+		.bind(("127.0.0.1", prometheus_port))?
+		.run();
+		info!(
+			"Prometheus metrics enabled at http://127.0.0.1:{}/metrics",
+			prometheus_port
+		);
+		Some((server.handle(), tokio::spawn(server)))
+	} else {
+		None
+	};
+
+	let server_res = server.await;
+	if let Some((handle, task)) = metrics_server {
+		handle.stop(true).await;
+		match task.await {
+			Ok(Ok(())) => {}
+			Ok(Err(error)) => tracing::error!(%error, "Metrics server failed"),
+			Err(error) => tracing::error!(%error, "Metrics server task failed"),
+		}
+	}
 
 	cancel_token.cancel();
 	let _ = token_drain_handle.await;
